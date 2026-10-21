@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+
+    <!-- NuGet metadata -->
+    <PackageId>TenantLint.Analyzers</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Ibrahim Kilic</Authors>
+    <Description>Roslyn analyzers that catch cross-tenant data leaks in multi-tenant .NET applications at build time.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ibrahimkilic/TenantLint</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ibrahimkilic/TenantLint</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>roslyn;analyzer;multi-tenant;tenant;isolation;ef-core;security</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DevelopmentDependency>true</DevelopmentDependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TenantLint.Analyzers\TenantLint.Analyzers.csproj" PrivateAssets="all" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TenantLint.CodeFixes\TenantLint.CodeFixes.csproj" PrivateAssets="all" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Pack analyzer and code fix DLLs into the analyzers folder -->
+  <Target Name="_AddAnalyzersToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_AnalyzerFile Include="..\TenantLint.Analyzers\bin\$(Configuration)\netstandard2.0\TenantLint.Analyzers.dll" />
+      <_AnalyzerFile Include="..\TenantLint.CodeFixes\bin\$(Configuration)\netstandard2.0\TenantLint.CodeFixes.dll" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <None Include="..\TenantLint.Analyzers\bin\$(Configuration)\netstandard2.0\TenantLint.Analyzers.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+    <None Include="..\TenantLint.CodeFixes\bin\$(Configuration)\netstandard2.0\TenantLint.CodeFixes.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+  </ItemGroup>
+
+</Project>

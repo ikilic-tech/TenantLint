@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{CBCB5605-43CF-41E0-85D6-5412AC9DB523}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenantLint.Analyzers", "src\TenantLint.Analyzers\TenantLint.Analyzers.csproj", "{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenantLint.CodeFixes", "src\TenantLint.CodeFixes\TenantLint.CodeFixes.csproj", "{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenantLint.Package", "src\TenantLint.Package\TenantLint.Package.csproj", "{09AE995F-BDF0-44F4-AA16-4A154A0C5922}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{BF5F623B-E6A3-4986-911C-0F3EEE66273C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TenantLint.Analyzers.Tests", "tests\TenantLint.Analyzers.Tests\TenantLint.Analyzers.Tests.csproj", "{CEF783F3-390B-4DE8-987D-DB4EF57256C7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{09AE995F-BDF0-44F4-AA16-4A154A0C5922}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09AE995F-BDF0-44F4-AA16-4A154A0C5922}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09AE995F-BDF0-44F4-AA16-4A154A0C5922}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09AE995F-BDF0-44F4-AA16-4A154A0C5922}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CEF783F3-390B-4DE8-987D-DB4EF57256C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CEF783F3-390B-4DE8-987D-DB4EF57256C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CEF783F3-390B-4DE8-987D-DB4EF57256C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CEF783F3-390B-4DE8-987D-DB4EF57256C7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B86FB346-8332-4FB8-9ECD-2E3DAFFED8D2} = {CBCB5605-43CF-41E0-85D6-5412AC9DB523}
+		{B07867C3-FD5A-4FD1-898A-FD5AC1DE251F} = {CBCB5605-43CF-41E0-85D6-5412AC9DB523}
+		{09AE995F-BDF0-44F4-AA16-4A154A0C5922} = {CBCB5605-43CF-41E0-85D6-5412AC9DB523}
+		{CEF783F3-390B-4DE8-987D-DB4EF57256C7} = {BF5F623B-E6A3-4986-911C-0F3EEE66273C}
+	EndGlobalSection
+EndGlobal
