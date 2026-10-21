@@ -18,5 +18,6 @@
 
     <!-- EF Core references for test compilations -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.8" />
   </ItemGroup>
 </Project>
