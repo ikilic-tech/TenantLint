@@ -7,33 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+## [0.1.0-preview.1] - 2026-10-23
 
-- Project scaffold: solution structure, build props, CI workflow.
-- `TenantModel`: per-compilation discovery of tenant-scoped entities from DbContext, `HasQueryFilter`, `IEntityTypeConfiguration`, and convention (DbSet + tenant property).
-- `.editorconfig` configuration: `tenantlint.tenant_property_names`, `tenantlint.tenant_column_names`, `tenantlint.global_entities`, `tenantlint.tenant_filter_name`, `tenantlint.cross_tenant_attribute`.
-- Dynamic query filter detection (TL900): informs when `foreach` over `GetEntityTypes()` with `HasQueryFilter`/`SetQueryFilter` is detected, reducing TL005 to Info severity for that context.
-- Table name collection: entity name, DbSet property name, `[Table]` attribute, `ToTable()`, plus snake_case and lowercase variants.
-- TL901 (Info): `[CrossTenant]` attribute should provide a reason string.
-- TL902 (Warning): class-level `[CrossTenant]` suppresses tenant checks for all methods — prefer method-level suppression.
-- Tri-state `FilterState` (`Filtered`, `Unfiltered`, `Unknown`) replacing boolean `HasExplicitFilter`. Dynamic filter contexts now mark entities as `Unknown` instead of silently treating them as filtered.
-- Inheritance filter propagation: `HasQueryFilter` on a base entity type is propagated to derived entity types exposed as `DbSet<T>`.
-- Lambda parameter verification: `HasQueryFilter` lambda analysis now verifies the member access is on the entity parameter, preventing false tenant-filter classification from unrelated objects.
-- EF Core 10 named-filter API verified: `HasQueryFilter(string, Expression<Func<T, bool>>)` and `IgnoreQueryFilters(IQueryable<T>, IReadOnlyCollection<string>)` confirmed against EF Core 10.0.0.
-- **TL001** (Warning): detects parameterless `IgnoreQueryFilters()` on tenant-scoped entities, including `ExecuteUpdate`/`ExecuteDelete` chains. Provides two code fixes: selective `IgnoreQueryFilters(["..."])` (EF Core 10+) and `[CrossTenant("")]` attribute.
-- TL001 code fix: rewrite to selective `IgnoreQueryFilters(["SoftDelete", ...])` when EF Core 10 named filters are available; add `[CrossTenant("")]` when `CrossTenantAttribute` exists in compilation.
-- `TenantEntityInfo.TenantFilterNames`: tracks which named filters reference the tenant property, enabling TL001 to compute non-tenant filter names for selective suggestions.
-- TL901 now also flags placeholder/empty reasons: `""`, `"TODO"`, `"reason"`, `"n/a"`, `"TODO: reason"`.
-- TL901/TL902 detection implemented via symbol actions on methods and named types.
-- EF Core 10 test infrastructure: `ReferenceAssemblies.Net.Net100` with EF Core 10.0.0 packages for analyzer test compilations.
-- **TL002** (Warning/Info): detects `ExecuteSqlRaw`, `ExecuteSql`, `ExecuteSqlInterpolated`, `SqlQueryRaw`, `SqlQuery` (and `Async` variants) whose constant or interpolated SQL text references a known tenant table name. Downgrades to Info when a tenant column appears in a `WHERE`/`ON`/`AND`/`OR` clause with a parameter placeholder. No code fix in v0.1.
-- `SqlAnalyzer`: reusable helper for word-boundary table name matching, predicate-clause tenant column detection, and SQL text extraction from IOperation/syntax trees. Shared by TL002 and TL003.
-- FromSql verification: confirmed EF Core composes global query filters over composable `FromSqlRaw`/`FromSqlInterpolated` queries; `FromSql*` excluded from TL002 scope.
-- **TL003** (Warning/Info): detects Dapper `SqlMapper` extension calls (`Query*`, `QueryFirst*`, `QuerySingle*`, `QueryMultiple*`, `Execute*`, `ExecuteScalar*`, `ExecuteReader*`, and `Async` variants) whose constant SQL text references a known tenant table name. Also covers SQL provided via `new CommandDefinition("...")`. Same severity logic as TL002. Detection by symbol (`Dapper.SqlMapper`), not by method name alone. No code fix in v0.1.
-- **TL005** (Warning): detects tenant-scoped entities (by convention: `DbSet<T>` where `T` has a tenant property) that have no explicit `HasQueryFilter` referencing the tenant property. Reported on the `DbSet<T>` property in the DbContext. Entities with inherited filters from a base type are not flagged. For `FilterState.Unknown` entities (dynamic filter loop detected), reports as **TL105** (Info) instead.
-- TL005 code fix: inserts `modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == TODO_SET_TENANT_ACCESSOR);` into `OnModelCreating` (creates override if missing). Intentionally produces CS0103 to force the developer to provide a real tenant accessor. Not offered when the entity is configured via `IEntityTypeConfiguration<T>`.
-- Separate diagnostic IDs for Info-severity variants: TL102 (was TL002 Info), TL103 (was TL003 Info), TL105 (TL005 dynamic filter variant).
-- `samples/SampleSaaS`: sample console app with one deliberate violation per rule (TL001, TL002, TL003, TL005). Build output demonstrates all diagnostics.
-- CI: sample build step verifies expected diagnostic IDs appear in build output.
-- README: problem statement, install, full rule table (including TL1xx and TL9xx), configuration, AI agent usage, comparison table, vision statement.
-- NuGet package `TenantLint.Analyzers` 0.1.0-preview.1: analyzer-only package (`analyzers/dotnet/cs`, no `lib/`), `DevelopmentDependency`, README included.
+### Rules
+
+- **TL001** (Warning): detects parameterless `IgnoreQueryFilters()` on tenant-scoped entities, including `ExecuteUpdate`/`ExecuteDelete` chains. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL001.md)
+- **TL002** (Warning) / **TL102** (Info): detects raw SQL via `ExecuteSqlRaw`, `ExecuteSql`, `ExecuteSqlInterpolated`, `SqlQuery` (+ async) that references a tenant table without apparent tenant filtering. Downgrades to Info when a tenant column appears in a predicate clause with a parameter. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL002.md)
+- **TL003** (Warning) / **TL103** (Info): detects Dapper `SqlMapper` calls (`Query*`, `Execute*`, etc.) whose SQL references a tenant table. Same severity logic as TL002. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL003.md)
+- **TL005** (Warning) / **TL105** (Info): detects tenant-scoped entities missing a `HasQueryFilter` for the tenant property. Info severity when dynamic filters are detected. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL005.md)
+- **TL900** (Info): reports when a dynamic query filter loop is detected in `OnModelCreating`.
+- **TL901** (Info): `[CrossTenant]` attribute missing or has a placeholder reason.
+- **TL902** (Warning): class-level `[CrossTenant]` suppresses all tenant checks — prefer method-level.
+
+### Code Fixes
+
+- **TL001**: rewrite to selective `IgnoreQueryFilters(["SoftDelete", ...])` (EF Core 10+); add `[CrossTenant("")]` attribute.
+- **TL005**: insert `HasQueryFilter` stub with `TODO_SET_TENANT_ACCESSOR` (intentional CS0103).
+
+### Configuration
+
+- `.editorconfig` keys: `tenantlint.tenant_property_names`, `tenantlint.tenant_column_names`, `tenantlint.global_entities`, `tenantlint.tenant_filter_name`, `tenantlint.cross_tenant_attribute`.
+- Per-rule severity override via standard `dotnet_diagnostic.TLxxx.severity`.
+
+### Packaging
+
+- NuGet package [`TenantLint.Analyzers`](https://www.nuget.org/packages/TenantLint.Analyzers) — analyzer-only (`analyzers/dotnet/cs`), `DevelopmentDependency`, MIT license.
+- Supports EF Core 8+ and EF Core 10 named filters.
+
+[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.1...HEAD
+[0.1.0-preview.1]: https://github.com/ikilic-tech/TenantLint/releases/tag/v0.1.0-preview.1
