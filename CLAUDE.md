@@ -66,8 +66,9 @@ Every rule depends on knowing **which entity types are tenant-scoped** and **wha
 ### Discovery (in priority order)
 1. **Explicit filters.** Find all types deriving from `Microsoft.EntityFrameworkCore.DbContext`. In `OnModelCreating` and in every `IEntityTypeConfiguration<T>.Configure`, find `HasQueryFilter(...)` calls (both the classic overload and the EF Core 10 named overload `HasQueryFilter("Name", expr)`). If the lambda body references a member whose name is in the tenant property list, mark the entity tenant-scoped **and** record the filter name (if any).
 2. **Convention.** An entity exposed as `DbSet<T>` on a DbContext that has a property named in the tenant property list is tenant-scoped (even if unfiltered — that is exactly what TL005 reports).
-3. **Dynamic filters.** If `OnModelCreating` loops over `modelBuilder.Model.GetEntityTypes()` and calls `HasQueryFilter` / `SetQueryFilter` dynamically, we cannot see which entities are covered. Treat every convention-tenant entity as filtered and suppress TL005 for that context (log an Info diagnostic TL900 once: "dynamic query filter detected, TL005 disabled for <Context>").
+3. **Dynamic filters.** If `OnModelCreating` loops over `modelBuilder.Model.GetEntityTypes()` and calls `HasQueryFilter` / `SetQueryFilter` dynamically, we cannot determine which entities are covered or whether the filters are tenant-related. Mark convention-tenant entities in that context as `FilterState.Unknown` (not `Filtered`). TL005 still reports for `Unknown` entities, but at `Info` severity instead of `Warning`, with the message: "entity may be missing a tenant filter; dynamic filter detected in <Context> — verify manually." Log TL900 (Info) once per affected context: "dynamic query filter detected in <Context>; TL005 reduced to Info for this context."
 4. **Table names** for raw-SQL rules: entity name, DbSet property name, `ToTable("x")` / `[Table("x")]`, plus snake_case and lowercase variants. Store them case-insensitively.
+5. **Inheritance.** After all discovery phases, propagate explicit filter status from base entity types to their derived types. In EF Core, `HasQueryFilter` can only be applied to the root entity of an inheritance hierarchy, and the filter automatically applies to all derived types. Therefore, if `BaseEntity` has an explicit tenant filter and `Customer : BaseEntity` is exposed as `DbSet<Customer>`, mark `Customer` as having an explicit filter.
 
 ### Configuration (`.editorconfig`, read via `AnalyzerConfigOptionsProvider`)
 ```ini
@@ -81,7 +82,7 @@ tenantlint.cross_tenant_attribute = CrossTenant                            # att
 Users can also change severity per rule with the standard `dotnet_diagnostic.TL001.severity = error`.
 
 ### Intentional cross-tenant access
-Any method or class decorated with an attribute whose **simple name** is `CrossTenant` / `CrossTenantAttribute` (any namespace; we do not ship a runtime package) is exempt from TL001–TL003. The attribute should take a reason string; if it is missing, report TL901 (Info): "CrossTenant attribute should state a reason". The README shows users a 3-line attribute to copy into their codebase.
+Any **method** decorated with an attribute whose **simple name** is `CrossTenant` / `CrossTenantAttribute` (any namespace; we do not ship a runtime package) is exempt from TL001–TL003 for diagnostics within that method. Class-level `[CrossTenant]` exempts all methods but emits TL902 (Warning): "Class-level [CrossTenant] suppresses tenant checks for all methods — prefer method-level suppression." The attribute should take a reason string; if it is missing or empty, report TL901 (Info): "[CrossTenant] should provide a reason." The README shows users a 3-line attribute to copy into their codebase.
 
 ## 4. Rules
 
@@ -93,16 +94,16 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 
 | ID | Default severity | Detects | Code fix |
 |---|---|---|---|
-| **TL001** | Warning | Parameterless `IgnoreQueryFilters()` on `IQueryable<T>` where `T` is tenant-scoped. If the project uses EF Core ≥ 10 and named filters exist, the fix lists the non-tenant filter names. On EF Core < 10 there is no partial alternative → message points to `[CrossTenant]`. | EF 10+: rewrite to `IgnoreQueryFilters(["<other filter names>"])`. Always: add `[CrossTenant("TODO: reason")]`. |
-| **TL002** | Warning | `Database.SqlQuery<T>`, `SqlQueryRaw<T>`, `ExecuteSql*`, `ExecuteSqlRaw*`, `ExecuteSqlInterpolated*` (+ `Async`) whose SQL text (literal, interpolated string, or constant) mentions a known tenant table name but **not** a tenant column name. Global query filters do not apply to these APIs. Non-constant SQL → do not report (avoid false positives). | None in v0.1 (message shows the expected `WHERE tenant_id = @tenant`). |
-| **TL003** | Warning | Dapper `SqlMapper` extension calls (`Query*`, `QueryFirst*`, `QuerySingle*`, `QueryMultiple*`, `Execute*`, `ExecuteScalar*`) with the same tenant-table / tenant-column check as TL002. Detect by symbol (`Dapper.SqlMapper`), not by method name alone. | None in v0.1. |
-| **TL004** | Warning | Tenant identity taken from client input in ASP.NET Core: action/endpoint parameters whose name matches the tenant property list and that are bound `[FromHeader]`, `[FromQuery]`, `[FromRoute]`, `[FromForm]`, or implicitly from query/route; properties of `[FromBody]` DTOs with a tenant-property name **when that value flows into a query, `Where`, or entity assignment in the same method**; `Request.Headers["X-Tenant-Id"]`-style reads. | None in v0.1 (message: "read the tenant from the authenticated principal, e.g. User.FindFirstValue("tenant")"). |
-| **TL005** | Warning | A tenant-scoped (by convention) entity exposed as `DbSet<T>` whose DbContext defines no query filter for it. Reported on the `DbSet<T>` property. Skipped for `global_entities` and when dynamic filters are detected (TL900). | Insert `modelBuilder.Entity<T>().HasQueryFilter(e => e.<TenantProp> == <tenant accessor>)` stub with a `// TODO` for the accessor. |
+| **TL001** | Warning | Parameterless `IgnoreQueryFilters()` on `IQueryable<T>` (including `ExecuteUpdate`/`ExecuteDelete` chains) where `T` is tenant-scoped. If the project uses EF Core ≥ 10 and named filters exist, the fix lists the non-tenant filter names. On EF Core < 10 there is no partial alternative → message points to `[CrossTenant]`. | EF 10+: rewrite to `IgnoreQueryFilters(["<other filter names>"])`. Always: add `[CrossTenant("TODO: reason")]`. |
+| **TL002** | Warning | `Database.SqlQuery<T>`, `SqlQueryRaw<T>`, `ExecuteSql*`, `ExecuteSqlRaw*`, `ExecuteSqlInterpolated*` (+ `Async`) whose SQL text (literal, interpolated string, or constant) mentions a known tenant table name. **Severity logic:** Warning by default. Downgrade to Info only when a tenant column name appears inside a `WHERE`, `ON`, or `AND`/`OR` clause adjacent to a parameter placeholder (`@param`, `{0}`/`{name}` interpolation, `$1`, `:param`). Presence of a tenant column in a `SELECT` list, `ORDER BY`, or other non-predicate position does NOT downgrade — e.g. `SELECT tenant_id FROM Customers` remains Warning. Non-constant SQL → do not report. Diagnostic message states "tenant table referenced in raw SQL without apparent tenant filtering" — this is a suspicious pattern, not a proven vulnerability. | None in v0.1 (message shows the expected `WHERE tenant_id = @tenant`). |
+| **TL003** | Warning | Dapper `SqlMapper` extension calls (`Query*`, `QueryFirst*`, `QuerySingle*`, `QueryMultiple*`, `Execute*`, `ExecuteScalar*`) with the same SQL analysis as TL002. Detect by symbol (`Dapper.SqlMapper`), not by method name alone. | None in v0.1. |
+| **TL005** | Warning | A tenant-scoped (by convention) entity exposed as `DbSet<T>` whose DbContext defines no query filter for it (after inheritance propagation). Reported on the `DbSet<T>` property. Skipped for `global_entities`. For `FilterState.Unknown` entities (dynamic filters detected), reported at Info severity. | Insert `modelBuilder.Entity<T>().HasQueryFilter(e => e.<TenantProp> == TODO_SET_TENANT_ACCESSOR)` where `TODO_SET_TENANT_ACCESSOR` is an undefined identifier that forces a compilation error. |
 
 ### v0.2
 
 | ID | Severity | Detects |
 |---|---|---|
+| **TL004** | Warning | Tenant identity taken from client input in ASP.NET Core: action/endpoint parameters whose name matches the tenant property list and that are bound `[FromHeader]`, `[FromQuery]`, `[FromRoute]`, `[FromForm]`; `Request.Headers["X-Tenant-Id"]`-style reads. Data-flow tracking (whether the value reaches a query) is deferred to v0.3; v0.2 reports the binding source regardless. |
 | **TL006** | Warning | `IMemoryCache` / `IDistributedCache` / `HybridCache` set/get/`GetOrCreate*` calls whose key is a constant or an interpolation with no tenant-related value, inside a method that also touches tenant-scoped data. |
 | **TL007** | Warning | Tenant context stored in a `static` field/property, or a type whose name contains `Tenant` (e.g. `ITenantContext`, `ICurrentTenant`) registered as `AddSingleton`. Also a singleton capturing a scoped tenant service in its constructor. |
 | **TL008** | Info | `BackgroundService` / `IHostedService` / Hangfire job methods that resolve or inject a DbContext with tenant-scoped entities without creating a scope / setting the tenant first. Heuristic → Info by default. |
@@ -110,12 +111,19 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 
 ### Verification tasks (do not skip)
 - **FromSql\***: EF Core composes global query filters over composable `FromSql*` queries on a `DbSet<T>`. Before finalizing TL002, write an integration test (SQLite in-memory, two tenants) that confirms this for EF Core 8 and 10. If filters turn out **not** to apply, extend TL002 to cover `FromSql*` and update `docs/rules/TL002.md`.
-- **Named filters API**: confirm the exact EF Core 10 signatures (`HasQueryFilter(string, LambdaExpression)`, `IgnoreQueryFilters(IReadOnlyCollection<string>)`) against the real package before coding TL001's fix.
+- **Named filters API** *(Verified against EF Core 10.0.0 — 2026-10-22)*:
+  - `EntityTypeBuilder.HasQueryFilter(LambdaExpression filter)`
+  - `EntityTypeBuilder.HasQueryFilter(String filterKey, LambdaExpression filter)`
+  - `EntityTypeBuilder<T>.HasQueryFilter(Expression<Func<T, bool>> filter)`
+  - `EntityTypeBuilder<T>.HasQueryFilter(String filterKey, Expression<Func<T, bool>> filter)`
+  - `EntityFrameworkQueryableExtensions.IgnoreQueryFilters<T>(IQueryable<T> source)` — parameterless (removes all)
+  - `EntityFrameworkQueryableExtensions.IgnoreQueryFilters<T>(IQueryable<T> source, IReadOnlyCollection<string> filterKeys)` — selective
 
 ## 5. Engineering rules
 
 - **Performance:** register syntax-node / operation actions narrowly (`OperationKind.Invocation`, `SymbolKind.Property`). Never walk the whole tree per node. Build the `TenantModel` once per compilation. Call `context.EnableConcurrentExecution()` and `ConfigureGeneratedCodeAnalysis(None)`.
 - **Use the IOperation API** (`IInvocationOperation`) over raw syntax wherever possible; resolve methods by symbol (`Compilation.GetTypeByMetadataName`) — never by string-matching method names alone.
+- **Filter lambda analysis:** When checking whether a `HasQueryFilter` lambda references a tenant property, verify that the member access is on the **lambda parameter** (the entity being filtered), not on an arbitrary receiver. This prevents false tenant-filter classification when unrelated objects happen to have a property matching the tenant property name.
 - **No false positives over coverage.** Every rule ships with at least 3 positive and 5 negative test cases (including look-alikes: a user method named `IgnoreQueryFilters`, a non-tenant entity, a `[CrossTenant]` method, string SQL built at runtime).
 - **IDE/agent experience:** diagnostic location is the narrowest meaningful span (the invocation name, the parameter, the DbSet property) so the squiggle and the build output line are precise.
 - **No runtime dependency** shipped to users. The package contains analyzers only.
@@ -135,14 +143,13 @@ A small .NET 10 minimal API + EF Core 10 (SQLite) multi-tenant app — `Customer
 
 ## 8. Milestones (work in this order; stop after each for maintainer review)
 
-- **M0 — Scaffold.** Solution, projects, props files, CPM, global.json, .editorconfig, empty analyzer + one dummy test passing, CI green, MIT license, README skeleton.
-- **M1 — TenantModel.** Discovery + `.editorconfig` options + unit tests for discovery (explicit filter, named filter, IEntityTypeConfiguration, convention, dynamic loop, global entities).
-- **M2 — TL001** + code fix + docs page.
-- **M3 — TL004** + docs page.
-- **M4 — TL002** (after the FromSql verification test) + docs page.
-- **M5 — TL003** + docs page.
-- **M6 — TL005** + code fix + docs page.
-- **M7 — Release v0.1.0.** Sample app with deliberate violations, README (problem → 30-second install → what it catches → AI-agent section → comparison table → config → contributing), CHANGELOG, pack verification, tag.
+- **M0 — Scaffold.** *(Done.)* Solution, projects, props files, CPM, global.json, .editorconfig, empty analyzer + one dummy test passing, CI green, MIT license, README skeleton.
+- **M1 — TenantModel.** *(Done.)* Discovery + `.editorconfig` options + unit tests. Post-M1 fixes applied: tri-state `FilterState` (F1), lambda parameter verification (F2), inheritance filter propagation (F3), `[CrossTenant]` scope tightening (F7).
+- **M2 — TL001** + code fix + docs page. Include `ExecuteUpdate`/`ExecuteDelete` chains. Review checkpoint: verify code fix produces correct `IgnoreQueryFilters(["..."])` for EF10 test compilations.
+- **M3 — TL002** (after the FromSql verification test) + docs page. Honest documentation of heuristic limitations.
+- **M4 — TL003** + docs page.
+- **M5 — TL005** + code fix (non-compiling stub) + docs page. Depends on M1 inheritance propagation.
+- **M6 — Release v0.1.0.** Sample app with deliberate violations, README (problem → 30-second install → what it catches → AI-agent section → comparison table → config → contributing), CHANGELOG, pack verification, tag.
 
 Definition of done for a milestone: builds with zero warnings in `src/`, all tests pass, docs updated, CHANGELOG entry added.
 

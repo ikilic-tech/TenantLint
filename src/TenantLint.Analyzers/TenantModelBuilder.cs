@@ -51,6 +51,10 @@ internal sealed class TenantModelBuilder
 
         AnalyzeEntityTypeConfigurations();
 
+        // Propagate explicit filters from base types to derived types (F3).
+        // EF Core only allows HasQueryFilter on root entities; the filter applies to all derived types.
+        PropagateInheritedFilters();
+
         // Build immutable result
         var entitiesBuilder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TenantEntityInfo>(
             SymbolEqualityComparer.Default);
@@ -66,17 +70,26 @@ internal sealed class TenantModelBuilder
                 tableNames = tableNames.Union(extraNames).ToImmutableHashSet(StringComparer.OrdinalIgnoreCase);
             }
 
-            // If context has dynamic filters, treat convention entities as filtered
-            if (!mutable.HasExplicitFilter &&
-                _dynamicFilterContexts.Contains(mutable.DbContextType))
+            // Determine filter state
+            FilterState filterState;
+            if (mutable.HasExplicitFilter)
             {
-                mutable.HasExplicitFilter = true;
+                filterState = FilterState.Filtered;
+            }
+            else if (_dynamicFilterContexts.Contains(mutable.DbContextType))
+            {
+                // Dynamic filters detected but we can't confirm coverage — mark Unknown
+                filterState = FilterState.Unknown;
+            }
+            else
+            {
+                filterState = FilterState.Unfiltered;
             }
 
             entitiesBuilder[kvp.Key] = new TenantEntityInfo(
                 mutable.EntityType,
                 mutable.TenantPropertyName,
-                mutable.HasExplicitFilter,
+                filterState,
                 mutable.FilterNames.ToImmutableArray(),
                 tableNames.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
                 mutable.DbContextType);
@@ -453,20 +466,38 @@ internal sealed class TenantModelBuilder
 
     private bool LambdaReferencesTenantProperty(SyntaxNode lambdaNode, SemanticModel semanticModel)
     {
-        foreach (var memberAccess in lambdaNode.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+        // Extract the lambda parameter symbol to verify member accesses are on the entity,
+        // not on an arbitrary receiver (e.g., someService.TenantId).
+        IParameterSymbol? lambdaParam = null;
+        if (lambdaNode is SimpleLambdaExpressionSyntax simpleLambda)
         {
-            if (_options.TenantPropertyNames.Contains(memberAccess.Name.Identifier.ValueText))
-                return true;
+            lambdaParam = semanticModel.GetDeclaredSymbol(simpleLambda.Parameter) as IParameterSymbol;
+        }
+        else if (lambdaNode is ParenthesizedLambdaExpressionSyntax parenLambda
+                 && parenLambda.ParameterList.Parameters.Count > 0)
+        {
+            lambdaParam = semanticModel.GetDeclaredSymbol(parenLambda.ParameterList.Parameters[0]) as IParameterSymbol;
         }
 
-        // Also check simple identifier access (e.g., in pattern matching or deconstruction)
-        foreach (var identifier in lambdaNode.DescendantNodes().OfType<IdentifierNameSyntax>())
+        foreach (var memberAccess in lambdaNode.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
         {
-            if (_options.TenantPropertyNames.Contains(identifier.Identifier.ValueText))
+            if (!_options.TenantPropertyNames.Contains(memberAccess.Name.Identifier.ValueText))
+                continue;
+
+            // Verify the receiver is the lambda parameter (the entity)
+            if (lambdaParam is not null)
             {
-                var symbolInfo = semanticModel.GetSymbolInfo(identifier);
-                if (symbolInfo.Symbol is IPropertySymbol or IFieldSymbol)
+                var receiverSymbol = semanticModel.GetSymbolInfo(memberAccess.Expression).Symbol;
+                if (receiverSymbol is IParameterSymbol paramSym
+                    && paramSym.Equals(lambdaParam, SymbolEqualityComparer.Default))
+                {
                     return true;
+                }
+            }
+            else
+            {
+                // Fallback: if we can't resolve the lambda parameter, accept the match
+                return true;
             }
         }
 
@@ -603,6 +634,31 @@ internal sealed class TenantModelBuilder
             return existing.DbContextType;
 
         return null;
+    }
+
+    private void PropagateInheritedFilters()
+    {
+        // EF Core only allows HasQueryFilter on the root entity of an inheritance hierarchy,
+        // and the filter applies to all derived types. Propagate filter status accordingly.
+        foreach (var kvp in _entities)
+        {
+            if (kvp.Value.HasExplicitFilter)
+                continue;
+
+            var baseType = kvp.Value.EntityType.BaseType;
+            while (baseType is not null)
+            {
+                if (_entities.TryGetValue(baseType, out var baseInfo) && baseInfo.HasExplicitFilter)
+                {
+                    kvp.Value.HasExplicitFilter = true;
+                    break;
+                }
+
+                // Also check entities not in the dict but whose type has a filter
+                // (e.g., base entity not exposed as DbSet but has HasQueryFilter)
+                baseType = baseType.BaseType;
+            }
+        }
     }
 
     private static bool DerivesFrom(INamedTypeSymbol type, INamedTypeSymbol baseType)

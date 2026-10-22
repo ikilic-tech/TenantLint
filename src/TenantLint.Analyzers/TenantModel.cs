@@ -41,8 +41,8 @@ internal sealed class TenantModel
     public bool IsTenantScoped(INamedTypeSymbol type) =>
         TenantEntities.ContainsKey(type);
 
-    public bool HasExplicitFilter(INamedTypeSymbol type) =>
-        TenantEntities.TryGetValue(type, out var info) && info.HasExplicitFilter;
+    public FilterState GetFilterState(INamedTypeSymbol type) =>
+        TenantEntities.TryGetValue(type, out var info) ? info.FilterState : FilterState.Unfiltered;
 
     public TenantEntityInfo? GetEntityByTableName(string tableName) =>
         TableNameToEntity.TryGetValue(tableName, out var info) ? info : null;

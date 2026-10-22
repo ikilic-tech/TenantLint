@@ -8,7 +8,7 @@ namespace TenantLint.Analyzers;
 public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
-        ImmutableArray.Create(Descriptors.TL000, Descriptors.TL900);
+        ImmutableArray.Create(Descriptors.TL000, Descriptors.TL900, Descriptors.TL901, Descriptors.TL902);
 
     public override void Initialize(AnalysisContext context)
     {
