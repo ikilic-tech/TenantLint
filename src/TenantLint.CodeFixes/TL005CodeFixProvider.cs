@@ -81,6 +81,11 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
         if (root is null)
             return document;
 
+        // Detect document line ending style
+        var sourceText = root.ToFullString();
+        var eol = sourceText.Contains("\r\n") ? "\r\n" : "\n";
+        var eolTrivia = SyntaxFactory.EndOfLine(eol);
+
         // Find the DbSet property from the diagnostic location
         var node = root.FindNode(diagnostic.Location.SourceSpan);
         var classDecl = node.FirstAncestorOrSelf<ClassDeclarationSyntax>();
@@ -127,7 +132,7 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
 
             var statement = SyntaxFactory.ParseStatement(statementText)
                 .WithLeadingTrivia(SyntaxFactory.Whitespace(indent))
-                .WithTrailingTrivia(SyntaxFactory.LineFeed);
+                .WithTrailingTrivia(eolTrivia);
 
             var newBody = onModelCreating.Body.AddStatements(statement);
             var newMethod = onModelCreating.WithBody(newBody);
@@ -137,10 +142,10 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
         {
             // Create a new OnModelCreating override
             var methodText =
-                "protected override void OnModelCreating(ModelBuilder modelBuilder)\n" +
-                "    {\n" +
-                "        base.OnModelCreating(modelBuilder);\n" +
-                "        " + statementText + "\n" +
+                "protected override void OnModelCreating(ModelBuilder modelBuilder)" + eol +
+                "    {" + eol +
+                "        base.OnModelCreating(modelBuilder);" + eol +
+                "        " + statementText + eol +
                 "    }";
 
             var method = SyntaxFactory.ParseMemberDeclaration(methodText);
@@ -148,7 +153,7 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
                 return document;
 
             method = method
-                .WithLeadingTrivia(SyntaxFactory.LineFeed, SyntaxFactory.Whitespace("    "))
+                .WithLeadingTrivia(eolTrivia, SyntaxFactory.Whitespace("    "))
                 .WithAdditionalAnnotations(Formatter.Annotation);
 
             var newClass = classDecl.AddMembers(method);
