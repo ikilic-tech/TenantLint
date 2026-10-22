@@ -13,6 +13,7 @@ public class ReportService
     public List<Customer> GetAllCustomers()
     {
         // TL001: deliberate — IgnoreQueryFilters() removes tenant filter
+        // Code fix suggests: .IgnoreQueryFilters(["SoftDelete"]) to keep the "Tenant" filter
         return _db.Customers.IgnoreQueryFilters().ToList();
     }
 

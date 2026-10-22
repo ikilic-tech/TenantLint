@@ -22,6 +22,7 @@ jobs:
         with:
           dotnet-version: |
             8.0.x
+            10.0.x
 
       - name: Restore
         run: dotnet restore
@@ -37,8 +38,9 @@ jobs:
 
       - name: Build sample and verify diagnostics
         shell: bash
+        working-directory: samples/SampleSaaS
         run: |
-          dotnet build samples/SampleSaaS/SampleSaaS.csproj --configuration Release 2>&1 | tee sample-build.log
+          dotnet build SampleSaaS.csproj --configuration Release 2>&1 | tee sample-build.log
           MISSING=0
           for id in TL001 TL002 TL003 TL005; do
             if ! grep -q "warning ${id}:" sample-build.log; then
@@ -76,8 +78,14 @@ jobs:
       - name: Pack
         run: dotnet pack src/TenantLint.Package/TenantLint.Package.csproj --configuration Release --output ./artifacts
 
+      - name: Login to NuGet (Trusted Publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to NuGet
-        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

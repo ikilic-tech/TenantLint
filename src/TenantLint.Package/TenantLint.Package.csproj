@@ -18,6 +18,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>roslyn;analyzer;multi-tenant;tenant;isolation;ef-core;security</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <DevelopmentDependency>true</DevelopmentDependency>
   </PropertyGroup>
 
@@ -28,6 +29,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Pack analyzer and code fix DLLs into the analyzers folder -->

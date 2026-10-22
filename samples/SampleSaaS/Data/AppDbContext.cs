@@ -25,8 +25,11 @@ public class AppDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<Order>().HasQueryFilter(e => e.TenantId == _tenantId);
+        // Named filters (EF Core 10): Customer has both "Tenant" and "SoftDelete" filters.
+        // TL001's selective code fix will suggest IgnoreQueryFilters(["SoftDelete"]) to keep the tenant filter.
+        modelBuilder.Entity<Customer>().HasQueryFilter("Tenant", e => e.TenantId == _tenantId);
+        modelBuilder.Entity<Customer>().HasQueryFilter("SoftDelete", e => !e.IsDeleted);
+        modelBuilder.Entity<Order>().HasQueryFilter("Tenant", e => e.TenantId == _tenantId);
         // Invoice intentionally has no filter — triggers TL005
     }
 }

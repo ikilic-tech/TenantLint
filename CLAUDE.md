@@ -37,7 +37,9 @@ TenantLint/
 ├─ Directory.Build.props        # shared props: LangVersion latest, Nullable enable, TreatWarningsAsErrors (src only), deterministic
 ├─ Directory.Packages.props     # Central Package Management
 ├─ .editorconfig
-├─ global.json                  # pin SDK (latest installed .NET 10 SDK, rollForward latestFeature)
+├─ global.json                  # pin SDK to .NET 8 (8.0.401, rollForward latestFeature); samples/ has its own global.json for .NET 10
+├─ assets/
+│  └─ icon.png                  # 128x128 package icon (blue shield with "TL")
 ├─ TenantLint.sln
 ├─ src/
 │  ├─ TenantLint.Analyzers/     # netstandard2.0 — DiagnosticAnalyzers only
@@ -143,23 +145,23 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 
 ## 6. Sample app (`samples/SampleSaaS`)
 
-A small .NET 10 minimal API + EF Core 10 (SQLite) multi-tenant app — `Customer`, `Order`, `Invoice` (tenant-scoped), `Tenant`, `Country` (global). Tenant comes from a JWT claim. It contains **one deliberate violation per rule**, each marked `// TL00x: deliberate`, so `dotnet build samples/SampleSaaS` shows every diagnostic. This is the demo for the README GIF and the launch blog post.
+A .NET 10 console app + EF Core 10 (SQLite) multi-tenant sample — `Customer`, `Order`, `Invoice` (tenant-scoped), `Tenant`, `Country` (global). Uses EF Core 10 **named filters** (`"Tenant"` and `"SoftDelete"` on Customer) so TL001's selective fix suggestion (`IgnoreQueryFilters(["SoftDelete"])`) is visible in build output. Contains **one deliberate violation per rule**, each marked `// TL00x: deliberate`, so `dotnet build samples/SampleSaaS` shows every diagnostic. Has its own `samples/global.json` (pinned to .NET 10 SDK) and `samples/Directory.Build.props` (CPM disabled) to isolate from the main solution.
 
 ## 7. CI (`.github/workflows/ci.yml`)
 - Matrix: ubuntu-latest, windows-latest; .NET 8 + 10 SDKs.
 - `dotnet build -warnaserror` (src), `dotnet test`, `dotnet pack`.
-- Build the sample and assert the expected diagnostic IDs appear (simple script comparing build output to an expected list).
-- On tag `v*`: pack and publish to NuGet via Trusted Publishing, create a GitHub Release with notes from CHANGELOG.
+- Build the sample (from `samples/SampleSaaS/` working directory so `samples/global.json` is used) and assert TL001/TL002/TL003/TL005 appear in build output.
+- On tag `v*`: pack and publish to NuGet via **NuGet Trusted Publishing** (`NuGet/login@v1` with `secrets.NUGET_USER`, short-lived OIDC key). No long-lived `NUGET_API_KEY` secret. Create a GitHub Release with notes from CHANGELOG.
 
 ## 8. Milestones (work in this order; stop after each for maintainer review)
 
 - **M0 — Scaffold.** *(Done.)* Solution, projects, props files, CPM, global.json, .editorconfig, empty analyzer + one dummy test passing, CI green, MIT license, README skeleton.
 - **M1 — TenantModel.** *(Done.)* Discovery + `.editorconfig` options + unit tests. Post-M1 fixes applied: tri-state `FilterState` (F1), lambda parameter verification (F2), inheritance filter propagation (F3), `[CrossTenant]` scope tightening (F7).
-- **M2 — TL001** + code fix + docs page. Include `ExecuteUpdate`/`ExecuteDelete` chains. Review checkpoint: verify code fix produces correct `IgnoreQueryFilters(["..."])` for EF10 test compilations.
-- **M3 — TL002** (after the FromSql verification test) + docs page. Honest documentation of heuristic limitations.
-- **M4 — TL003** + docs page.
-- **M5 — TL005** + code fix (non-compiling stub) + docs page. Depends on M1 inheritance propagation.
-- **M6 — Release v0.1.0.** Sample app with deliberate violations, README (problem → 30-second install → what it catches → AI-agent section → comparison table → config → contributing), CHANGELOG, pack verification, tag.
+- **M2 — TL001** *(Done.)* Code fix + docs page. Includes `ExecuteUpdate`/`ExecuteDelete` chains and selective `IgnoreQueryFilters(["..."])` for EF Core 10.
+- **M3 — TL002** *(Done.)* FromSql verification confirmed filters apply; `FromSql*` excluded. Docs page with heuristic limitations.
+- **M4 — TL003** *(Done.)* Dapper `SqlMapper` detection, same SQL analysis as TL002. Docs page.
+- **M5 — TL005** *(Done.)* Code fix (non-compiling stub). Separate Info-severity IDs: TL102, TL103, TL105. Docs page.
+- **M6 — Release v0.1.0.** *(In progress.)* Sample app (net10.0, named filters, 4 violations), README, pack verification (icon, 0.1.0-preview.1), CI with NuGet Trusted Publishing. Tag pending.
 
 Definition of done for a milestone: builds with zero warnings in `src/`, all tests pass, docs updated, CHANGELOG entry added.
 
