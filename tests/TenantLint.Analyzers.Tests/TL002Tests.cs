@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using Xunit;
 
 namespace TenantLint.Analyzers.Tests;
@@ -161,10 +160,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL002Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL102)
             .WithLocation(0)
             .WithArguments("ExecuteSqlRaw", "Customers", "tenant_id")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithEfCoreAsync(source, expected);
     }
@@ -200,10 +199,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL002Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL102)
             .WithLocation(0)
             .WithArguments("ExecuteSqlRaw", "Customers", "TenantId")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithEfCoreAsync(source, expected);
     }
@@ -574,10 +573,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL002Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL102)
             .WithLocation(0)
             .WithArguments("ExecuteSqlRaw", "Customers", "tenant_id")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithEfCore10Async(source, expected);
     }

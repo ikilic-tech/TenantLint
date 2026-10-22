@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using Xunit;
 
 namespace TenantLint.Analyzers.Tests;
@@ -168,10 +167,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL003Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL103)
             .WithLocation(0)
             .WithArguments("Execute", "Customers", "tenant_id")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithDapperAsync(source, expected);
     }
@@ -255,10 +254,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL003Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL103)
             .WithLocation(0)
             .WithArguments("Execute", "Customers", "TenantId")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithDapperAsync(source, expected);
     }
@@ -898,10 +897,10 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL003Filtered)
+        var expected = Verify.Diagnostic(Descriptors.TL103)
             .WithLocation(0)
             .WithArguments("Query", "Customers", "tenant_id")
-            .WithSeverity(DiagnosticSeverity.Info);
+;
 
         await Verify.VerifyWithDapper10Async(source, expected);
     }

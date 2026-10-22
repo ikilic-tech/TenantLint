@@ -27,9 +27,11 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL001,
             Descriptors.TL001NoSelective,
             Descriptors.TL002,
-            Descriptors.TL002Filtered,
+            Descriptors.TL102,
             Descriptors.TL003,
-            Descriptors.TL003Filtered,
+            Descriptors.TL103,
+            Descriptors.TL005,
+            Descriptors.TL105,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -239,7 +241,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             return;
 
         ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
-            Descriptors.TL002, Descriptors.TL002Filtered);
+            Descriptors.TL002, Descriptors.TL102);
     }
 
     private static void ReportRawSqlDiagnostic(
@@ -267,21 +269,9 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                 ? memberAccess.Name.GetLocation()
                 : invocation.Syntax.GetLocation();
 
-        // When tenant column appears in predicate, downgrade to Info
-        var effectiveSeverity = result.HasTenantColumnInPredicate
-            ? DiagnosticSeverity.Info
-            : (DiagnosticSeverity?)null;
-
-        var diagnostic = effectiveSeverity.HasValue
-            ? Diagnostic.Create(
-                descriptor, location, effectiveSeverity.Value,
-                additionalLocations: null, properties: null,
-                methodName, result.MatchedTableName, result.MatchedColumnName)
-            : Diagnostic.Create(
-                descriptor, location,
-                methodName, result.MatchedTableName, result.MatchedColumnName);
-
-        context.ReportDiagnostic(diagnostic);
+        context.ReportDiagnostic(Diagnostic.Create(
+            descriptor, location,
+            methodName, result.MatchedTableName, result.MatchedColumnName));
     }
 
     private static void AnalyzeDapperInvocation(
@@ -313,7 +303,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         if (SqlAnalyzer.TryExtractSqlFromInvocation(invocation, "sql", out var sqlText))
         {
             ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
-                Descriptors.TL003, Descriptors.TL003Filtered);
+                Descriptors.TL003, Descriptors.TL103);
             return;
         }
 
@@ -322,7 +312,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             TryExtractSqlFromCommandDefinitionArg(invocation, dapperCommandDefinition, out sqlText))
         {
             ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
-                Descriptors.TL003, Descriptors.TL003Filtered);
+                Descriptors.TL003, Descriptors.TL103);
         }
     }
 

@@ -43,12 +43,12 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL002.md");
 
-    public static readonly DiagnosticDescriptor TL002Filtered = new(
-        id: "TL002",
+    public static readonly DiagnosticDescriptor TL102 = new(
+        id: "TL102",
         title: "Raw SQL references tenant table with possible tenant filtering",
         messageFormat: "'{0}' references tenant table '{1}' in raw SQL. Tenant column '{2}' appears in a predicate clause, but verify the filter is correct.",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL002.md");
 
@@ -61,14 +61,32 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL003.md");
 
-    public static readonly DiagnosticDescriptor TL003Filtered = new(
-        id: "TL003",
+    public static readonly DiagnosticDescriptor TL103 = new(
+        id: "TL103",
         title: "Dapper raw SQL references tenant table with possible tenant filtering",
         messageFormat: "'{0}' references tenant table '{1}' in raw SQL. Tenant column '{2}' appears in a predicate clause, but verify the filter is correct.",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL003.md");
+
+    public static readonly DiagnosticDescriptor TL005 = new(
+        id: "TL005",
+        title: "Tenant-scoped entity has no query filter",
+        messageFormat: "'{0}' is tenant-scoped (has property '{1}') but DbContext '{2}' defines no query filter for it. Add HasQueryFilter or mark it in tenantlint.global_entities.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL005.md");
+
+    public static readonly DiagnosticDescriptor TL105 = new(
+        id: "TL105",
+        title: "Tenant-scoped entity may be missing a query filter (dynamic filter detected)",
+        messageFormat: "'{0}' may be missing a tenant filter. Dynamic filter detected in '{2}'; verify manually that '{1}' is filtered.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL005.md");
 
     public static readonly DiagnosticDescriptor TL900 = new(
         id: "TL900",
