@@ -115,7 +115,49 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                 symbolContext => AnalyzeNamedTypeSymbol(symbolContext, options),
                 SymbolKind.NamedType);
 
-            // Report TL900 for each DbContext with dynamic filters
+            // TL005/TL105: Report unfiltered tenant entities via SymbolAction (local diagnostic)
+            // Build a lookup of DbSet properties that need TL005/TL105 reporting
+            var unfilteredDbSetProperties = new Dictionary<IPropertySymbol, TenantEntityInfo>(
+                SymbolEqualityComparer.Default);
+            foreach (var kvp in model.TenantEntities)
+            {
+                var info = kvp.Value;
+                if (info.FilterState != FilterState.Filtered && info.DbSetProperty is not null)
+                    unfilteredDbSetProperties[info.DbSetProperty] = info;
+            }
+
+            if (unfilteredDbSetProperties.Count > 0)
+            {
+                compilationStartContext.RegisterSymbolAction(
+                    symbolContext =>
+                    {
+                        var property = (IPropertySymbol)symbolContext.Symbol;
+                        if (!unfilteredDbSetProperties.TryGetValue(property, out var info))
+                            return;
+
+                        var descriptor = info.FilterState == FilterState.Unknown
+                            ? Descriptors.TL105
+                            : Descriptors.TL005;
+
+                        var propertiesBuilder = ImmutableDictionary.CreateBuilder<string, string?>();
+                        propertiesBuilder.Add("EntityTypeName", info.EntityType.ToDisplayString());
+                        propertiesBuilder.Add("TenantPropertyName", info.TenantPropertyName);
+                        propertiesBuilder.Add("HasEntityTypeConfiguration",
+                            info.HasEntityTypeConfiguration.ToString());
+                        propertiesBuilder.Add("DbContextTypeName", info.DbContextType.ToDisplayString());
+
+                        symbolContext.ReportDiagnostic(Diagnostic.Create(
+                            descriptor,
+                            property.Locations.FirstOrDefault() ?? Location.None,
+                            propertiesBuilder.ToImmutable(),
+                            info.EntityType.Name,
+                            info.TenantPropertyName,
+                            info.DbContextType.Name));
+                    },
+                    SymbolKind.Property);
+            }
+
+            // TL900: Report dynamic filter contexts (CompilationEnd — no code fix needed)
             if (model.DynamicFilterContexts.Count > 0)
             {
                 compilationStartContext.RegisterCompilationEndAction(endContext =>

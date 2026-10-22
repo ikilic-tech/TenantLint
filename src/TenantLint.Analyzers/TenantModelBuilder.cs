@@ -93,7 +93,9 @@ internal sealed class TenantModelBuilder
                 mutable.FilterNames.ToImmutableArray(),
                 mutable.TenantFilterNames.ToImmutableArray(),
                 tableNames.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
-                mutable.DbContextType);
+                mutable.DbContextType,
+                mutable.DbSetProperty,
+                mutable.HasEntityTypeConfiguration);
         }
 
         return new TenantModel(
@@ -170,7 +172,8 @@ internal sealed class TenantModelBuilder
                     TenantPropertyName = tenantProperty,
                     HasExplicitFilter = false,
                     DbContextType = contextType,
-                    DbSetPropertyName = property.Name
+                    DbSetPropertyName = property.Name,
+                    DbSetProperty = property
                 };
             }
         }
@@ -230,6 +233,10 @@ internal sealed class TenantModelBuilder
 
         foreach (var (configType, entityType) in configTypes)
         {
+            // Mark that this entity has an IEntityTypeConfiguration
+            if (_entities.TryGetValue(entityType, out var entityInfo))
+                entityInfo.HasEntityTypeConfiguration = true;
+
             var configureMethod = configType.GetMembers("Configure")
                 .OfType<IMethodSymbol>()
                 .FirstOrDefault(m => m.Parameters.Length == 1);
@@ -689,5 +696,7 @@ internal sealed class TenantModelBuilder
         public List<string> TenantFilterNames { get; } = new();
         public INamedTypeSymbol DbContextType { get; set; } = null!;
         public string? DbSetPropertyName { get; set; }
+        public IPropertySymbol? DbSetProperty { get; set; }
+        public bool HasEntityTypeConfiguration { get; set; }
     }
 }

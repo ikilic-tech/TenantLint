@@ -350,7 +350,7 @@ public class Customer
 
 public class AppDbContext : DbContext
 {
-    public DbSet<Customer> Customers { get; set; }
+    public DbSet<Customer> {|#1:Customers|} { get; set; }
 }
 
 public class MyService
@@ -361,11 +361,15 @@ public class MyService
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL001NoSelective)
+        var expectedTL001 = Verify.Diagnostic(Descriptors.TL001NoSelective)
             .WithLocation(0)
             .WithArguments("Customer");
 
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        var expectedTL005 = Verify.Diagnostic(Descriptors.TL005)
+            .WithLocation(1)
+            .WithArguments("Customer", "TenantId", "AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL001, expectedTL005);
     }
 
     // ===========================================================

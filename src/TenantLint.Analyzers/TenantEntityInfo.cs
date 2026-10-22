@@ -30,6 +30,8 @@ internal sealed class TenantEntityInfo
     public ImmutableArray<string> TenantFilterNames { get; }
     public ImmutableHashSet<string> TableNames { get; }
     public INamedTypeSymbol DbContextType { get; }
+    public IPropertySymbol? DbSetProperty { get; }
+    public bool HasEntityTypeConfiguration { get; }
 
     public TenantEntityInfo(
         INamedTypeSymbol entityType,
@@ -38,7 +40,9 @@ internal sealed class TenantEntityInfo
         ImmutableArray<string> filterNames,
         ImmutableArray<string> tenantFilterNames,
         ImmutableHashSet<string> tableNames,
-        INamedTypeSymbol dbContextType)
+        INamedTypeSymbol dbContextType,
+        IPropertySymbol? dbSetProperty = null,
+        bool hasEntityTypeConfiguration = false)
     {
         EntityType = entityType;
         TenantPropertyName = tenantPropertyName;
@@ -47,5 +51,7 @@ internal sealed class TenantEntityInfo
         TenantFilterNames = tenantFilterNames;
         TableNames = tableNames;
         DbContextType = dbContextType;
+        DbSetProperty = dbSetProperty;
+        HasEntityTypeConfiguration = hasEntityTypeConfiguration;
     }
 }

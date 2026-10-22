@@ -338,7 +338,7 @@ public class Customer
 
 public class {|#0:AppDbContext|} : DbContext
 {
-    public DbSet<Customer> Customers { get; set; }
+    public DbSet<Customer> {|#1:Customers|} { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -352,11 +352,15 @@ public class {|#0:AppDbContext|} : DbContext
     private static LambdaExpression BuildFilterExpression(Type type) => throw new NotImplementedException();
 }
 ";
-        var expected = Verify.Diagnostic("TL900")
+        var expectedTL900 = Verify.Diagnostic("TL900")
             .WithLocation(0)
             .WithArguments("AppDbContext");
 
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        var expectedTL105 = Verify.Diagnostic("TL105")
+            .WithLocation(1)
+            .WithArguments("Customer", "TenantId", "AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL900, expectedTL105);
     }
 
     // ===== TABLE NAMES =====

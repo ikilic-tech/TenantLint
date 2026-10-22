@@ -27,7 +27,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -64,7 +63,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -101,7 +99,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -138,7 +135,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -175,7 +171,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -212,7 +207,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -249,7 +243,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -286,7 +279,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -323,7 +315,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -360,7 +351,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
@@ -394,7 +384,6 @@ public class CrossTenantAttribute : Attribute
 public class Customer
 {
     public int Id { get; set; }
-    public string TenantId { get; set; }
 }
 
 public class AppDbContext : DbContext
