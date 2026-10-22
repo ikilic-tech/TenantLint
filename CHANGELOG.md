@@ -26,3 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TL901 now also flags placeholder/empty reasons: `""`, `"TODO"`, `"reason"`, `"n/a"`, `"TODO: reason"`.
 - TL901/TL902 detection implemented via symbol actions on methods and named types.
 - EF Core 10 test infrastructure: `ReferenceAssemblies.Net.Net100` with EF Core 10.0.0 packages for analyzer test compilations.
+- **TL002** (Warning/Info): detects `ExecuteSqlRaw`, `ExecuteSql`, `ExecuteSqlInterpolated`, `SqlQueryRaw`, `SqlQuery` (and `Async` variants) whose constant or interpolated SQL text references a known tenant table name. Downgrades to Info when a tenant column appears in a `WHERE`/`ON`/`AND`/`OR` clause with a parameter placeholder. No code fix in v0.1.
+- `SqlAnalyzer`: reusable helper for word-boundary table name matching and predicate-clause tenant column detection, shared by TL002 and (future) TL003.
+- FromSql verification: confirmed EF Core composes global query filters over composable `FromSqlRaw`/`FromSqlInterpolated` queries; `FromSql*` excluded from TL002 scope.

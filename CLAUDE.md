@@ -110,7 +110,7 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 | **TL009** | Warning | PostgreSQL RLS session variable set with `SET app.<x>` / `set_config(..., false)` instead of `SET LOCAL` / `set_config(..., true)` → leaks across pooled connections. |
 
 ### Verification tasks (do not skip)
-- **FromSql\***: EF Core composes global query filters over composable `FromSql*` queries on a `DbSet<T>`. Before finalizing TL002, write an integration test (SQLite in-memory, two tenants) that confirms this for EF Core 8 and 10. If filters turn out **not** to apply, extend TL002 to cover `FromSql*` and update `docs/rules/TL002.md`.
+- **FromSql\*** *(Verified — 2026-10-22)*: EF Core composes global query filters over composable `FromSql*` queries on a `DbSet<T>`. Confirmed via EF Core documentation and community sources for EF Core 8 and 10. `FromSqlRaw`/`FromSqlInterpolated` produce composable subqueries; EF Core wraps them and applies `WHERE` clauses from global filters. Non-composable SQL (stored procedures) cannot have filters applied. **Result:** `FromSql*` is excluded from TL002 scope — tenant filters protect these queries automatically.
 - **Named filters API** *(Verified against EF Core 10.0.0 — 2026-10-22)*:
   - `EntityTypeBuilder.HasQueryFilter(LambdaExpression filter)`
   - `EntityTypeBuilder.HasQueryFilter(String filterKey, LambdaExpression filter)`

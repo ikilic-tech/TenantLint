@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -14,11 +15,20 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
             "", "TODO", "reason", "n/a", "TODO: reason");
 
+    private static readonly ImmutableHashSet<string> RawSqlMethodNames =
+        ImmutableHashSet.Create(StringComparer.Ordinal,
+            "ExecuteSql", "ExecuteSqlAsync",
+            "ExecuteSqlRaw", "ExecuteSqlRawAsync",
+            "ExecuteSqlInterpolated", "ExecuteSqlInterpolatedAsync",
+            "SqlQuery", "SqlQueryRaw");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
         ImmutableArray.Create(
             Descriptors.TL000,
             Descriptors.TL001,
             Descriptors.TL001NoSelective,
+            Descriptors.TL002,
+            Descriptors.TL002Filtered,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -58,13 +68,27 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             var hasCrossTenantAttribute = HasCrossTenantAttributeInCompilation(
                 compilation, options.CrossTenantAttribute);
 
-            // TL001: Register invocation operation action
-            if (efQueryableExtensions is not null)
+            // TL001 + TL002: Register single invocation operation action
+            var relationalDbFacadeExtensions = compilation.GetTypeByMetadataName(
+                "Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions");
+
+            if (efQueryableExtensions is not null || relationalDbFacadeExtensions is not null)
             {
                 compilationStartContext.RegisterOperationAction(
-                    operationContext => AnalyzeInvocation(
-                        operationContext, model, options, efQueryableExtensions,
-                        hasSelectiveOverload, hasCrossTenantAttribute),
+                    operationContext =>
+                    {
+                        if (efQueryableExtensions is not null)
+                        {
+                            AnalyzeInvocation(
+                                operationContext, model, options, efQueryableExtensions,
+                                hasSelectiveOverload, hasCrossTenantAttribute);
+                        }
+                        if (relationalDbFacadeExtensions is not null)
+                        {
+                            AnalyzeRawSqlInvocation(
+                                operationContext, model, options, relationalDbFacadeExtensions);
+                        }
+                    },
                     OperationKind.Invocation);
             }
 
@@ -172,6 +196,223 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             propertiesBuilder.ToImmutable(),
             entityType.Name,
             filterNamesArg));
+    }
+
+    private static void AnalyzeRawSqlInvocation(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol relationalDbFacadeExtensions)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        // Check method name is a known raw SQL method
+        if (!RawSqlMethodNames.Contains(targetMethod.Name))
+            return;
+
+        // Check this is RelationalDatabaseFacadeExtensions (extension method).
+        // For methods taking FormattableString, the compiler may resolve
+        // the extension method differently — check both ReducedFrom and original.
+        var originalMethod = targetMethod.ReducedFrom ?? targetMethod;
+        var containingType = originalMethod.ContainingType;
+        if (containingType is null ||
+            !containingType.Equals(relationalDbFacadeExtensions, SymbolEqualityComparer.Default))
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Extract SQL text
+        if (!TryExtractSqlText(invocation, out var sqlText))
+            return;
+
+        // Analyze the SQL
+        var result = SqlAnalyzer.Analyze(sqlText, model, options);
+        if (!result.HasTenantTableReference)
+            return;
+
+        // Choose descriptor based on predicate heuristic
+        var descriptor = result.HasTenantColumnInPredicate
+            ? Descriptors.TL002Filtered
+            : Descriptors.TL002;
+
+        // Narrow location to the method name token
+        var location = invocation.Syntax is InvocationExpressionSyntax invocationSyntax
+            && invocationSyntax.Expression is MemberAccessExpressionSyntax memberAccess
+                ? memberAccess.Name.GetLocation()
+                : invocation.Syntax.GetLocation();
+
+        // When tenant column appears in predicate, downgrade to Info
+        var effectiveSeverity = result.HasTenantColumnInPredicate
+            ? DiagnosticSeverity.Info
+            : (DiagnosticSeverity?)null;
+
+        var diagnostic = effectiveSeverity.HasValue
+            ? Diagnostic.Create(
+                descriptor,
+                location,
+                effectiveSeverity.Value,
+                additionalLocations: null,
+                properties: null,
+                targetMethod.Name,
+                result.MatchedTableName,
+                result.MatchedColumnName)
+            : Diagnostic.Create(
+                descriptor,
+                location,
+                targetMethod.Name,
+                result.MatchedTableName,
+                result.MatchedColumnName);
+
+        context.ReportDiagnostic(diagnostic);
+    }
+
+    private static bool TryExtractSqlText(IInvocationOperation invocation, out string sqlText)
+    {
+        sqlText = "";
+
+        // Find the sql parameter argument
+        IArgumentOperation? sqlArg = null;
+        foreach (var arg in invocation.Arguments)
+        {
+            if (arg.Parameter?.Name == "sql")
+            {
+                sqlArg = arg;
+                break;
+            }
+        }
+
+        if (sqlArg is null)
+            return false;
+
+        // Try IOperation-based extraction first
+        if (TryExtractSqlFromOperation(sqlArg.Value, out sqlText))
+            return true;
+
+        // Fallback: extract from syntax (handles cases where IOperation lowers
+        // interpolated strings to FormattableStringFactory.Create or other patterns)
+        return TryExtractSqlFromSyntax(sqlArg, out sqlText);
+    }
+
+    private static bool TryExtractSqlFromOperation(IOperation operation, out string sqlText)
+    {
+        sqlText = "";
+
+        // Unwrap conversion operations
+        var value = operation;
+        while (value is IConversionOperation conversion)
+            value = conversion.Operand;
+
+        // Check for constant string
+        if (value.ConstantValue.HasValue && value.ConstantValue.Value is string constantSql)
+        {
+            sqlText = constantSql;
+            return true;
+        }
+
+        // Check for interpolated string
+        if (value is IInterpolatedStringOperation interpolated)
+        {
+            return TryBuildSqlFromInterpolation(interpolated, out sqlText);
+        }
+
+        // Handle FormattableString lowering: FormattableStringFactory.Create(format, args)
+        if (value is IInvocationOperation factoryCall &&
+            factoryCall.TargetMethod.Name == "Create" &&
+            factoryCall.TargetMethod.ContainingType?.Name == "FormattableStringFactory" &&
+            factoryCall.Arguments.Length >= 1)
+        {
+            var formatArg = factoryCall.Arguments[0].Value;
+            while (formatArg is IConversionOperation formatConversion)
+                formatArg = formatConversion.Operand;
+
+            if (formatArg.ConstantValue.HasValue && formatArg.ConstantValue.Value is string format)
+            {
+                sqlText = format;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildSqlFromInterpolation(IInterpolatedStringOperation interpolated, out string sqlText)
+    {
+        var sb = new StringBuilder();
+        var placeholderIndex = 0;
+        foreach (var part in interpolated.Parts)
+        {
+            if (part is IInterpolatedStringTextOperation textPart)
+            {
+                if (textPart.ConstantValue.HasValue && textPart.ConstantValue.Value is string text)
+                    sb.Append(text);
+            }
+            else
+            {
+                sb.Append('{').Append(placeholderIndex++).Append('}');
+            }
+        }
+
+        sqlText = sb.ToString();
+        return sqlText.Length > 0;
+    }
+
+    private static bool TryExtractSqlFromSyntax(IArgumentOperation argument, out string sqlText)
+    {
+        sqlText = "";
+
+        // Walk the syntax tree to find an interpolated string expression
+        var syntax = argument.Syntax;
+        if (syntax is null)
+            return false;
+
+        // Find the interpolated string in the argument's syntax subtree
+        var interpolatedSyntax = FindDescendantOrSelf<InterpolatedStringExpressionSyntax>(syntax);
+        if (interpolatedSyntax is not null)
+        {
+            var sb = new StringBuilder();
+            var placeholderIndex = 0;
+            foreach (var content in interpolatedSyntax.Contents)
+            {
+                if (content is InterpolatedStringTextSyntax textPart)
+                {
+                    sb.Append(textPart.TextToken.ValueText);
+                }
+                else if (content is InterpolationSyntax)
+                {
+                    sb.Append('{').Append(placeholderIndex++).Append('}');
+                }
+            }
+
+            sqlText = sb.ToString();
+            return sqlText.Length > 0;
+        }
+
+        // Check for a constant string in syntax (e.g., string literal argument)
+        var literalSyntax = FindDescendantOrSelf<LiteralExpressionSyntax>(syntax);
+        if (literalSyntax is not null && literalSyntax.Token.Value is string literalText)
+        {
+            sqlText = literalText;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static T? FindDescendantOrSelf<T>(SyntaxNode node) where T : SyntaxNode
+    {
+        if (node is T match)
+            return match;
+
+        foreach (var child in node.DescendantNodes())
+        {
+            if (child is T childMatch)
+                return childMatch;
+        }
+
+        return null;
     }
 
     private static bool IsExemptByCrossTenant(ISymbol? containingSymbol, string crossTenantAttributeName)
