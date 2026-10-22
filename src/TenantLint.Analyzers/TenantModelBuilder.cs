@@ -91,6 +91,7 @@ internal sealed class TenantModelBuilder
                 mutable.TenantPropertyName,
                 filterState,
                 mutable.FilterNames.ToImmutableArray(),
+                mutable.TenantFilterNames.ToImmutableArray(),
                 tableNames.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
                 mutable.DbContextType);
         }
@@ -416,7 +417,10 @@ internal sealed class TenantModelBuilder
         {
             info.HasExplicitFilter = true;
             if (filterName is not null)
+            {
                 info.FilterNames.Add(filterName);
+                info.TenantFilterNames.Add(filterName);
+            }
         }
         else if (contextType is not null)
         {
@@ -428,7 +432,10 @@ internal sealed class TenantModelBuilder
                 DbContextType = contextType,
             };
             if (filterName is not null)
+            {
                 newInfo.FilterNames.Add(filterName);
+                newInfo.TenantFilterNames.Add(filterName);
+            }
             _entities[entityType] = newInfo;
         }
     }
@@ -679,6 +686,7 @@ internal sealed class TenantModelBuilder
         public string TenantPropertyName { get; set; } = null!;
         public bool HasExplicitFilter { get; set; }
         public List<string> FilterNames { get; } = new();
+        public List<string> TenantFilterNames { get; } = new();
         public INamedTypeSymbol DbContextType { get; set; } = null!;
         public string? DbSetPropertyName { get; set; }
     }

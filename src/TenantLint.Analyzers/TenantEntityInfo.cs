@@ -27,6 +27,7 @@ internal sealed class TenantEntityInfo
     public string TenantPropertyName { get; }
     public FilterState FilterState { get; }
     public ImmutableArray<string> FilterNames { get; }
+    public ImmutableArray<string> TenantFilterNames { get; }
     public ImmutableHashSet<string> TableNames { get; }
     public INamedTypeSymbol DbContextType { get; }
 
@@ -35,6 +36,7 @@ internal sealed class TenantEntityInfo
         string tenantPropertyName,
         FilterState filterState,
         ImmutableArray<string> filterNames,
+        ImmutableArray<string> tenantFilterNames,
         ImmutableHashSet<string> tableNames,
         INamedTypeSymbol dbContextType)
     {
@@ -42,6 +44,7 @@ internal sealed class TenantEntityInfo
         TenantPropertyName = tenantPropertyName;
         FilterState = filterState;
         FilterNames = filterNames;
+        TenantFilterNames = tenantFilterNames;
         TableNames = tableNames;
         DbContextType = dbContextType;
     }

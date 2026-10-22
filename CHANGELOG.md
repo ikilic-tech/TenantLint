@@ -20,3 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Inheritance filter propagation: `HasQueryFilter` on a base entity type is propagated to derived entity types exposed as `DbSet<T>`.
 - Lambda parameter verification: `HasQueryFilter` lambda analysis now verifies the member access is on the entity parameter, preventing false tenant-filter classification from unrelated objects.
 - EF Core 10 named-filter API verified: `HasQueryFilter(string, Expression<Func<T, bool>>)` and `IgnoreQueryFilters(IQueryable<T>, IReadOnlyCollection<string>)` confirmed against EF Core 10.0.0.
+- **TL001** (Warning): detects parameterless `IgnoreQueryFilters()` on tenant-scoped entities, including `ExecuteUpdate`/`ExecuteDelete` chains. Provides two code fixes: selective `IgnoreQueryFilters(["..."])` (EF Core 10+) and `[CrossTenant("")]` attribute.
+- TL001 code fix: rewrite to selective `IgnoreQueryFilters(["SoftDelete", ...])` when EF Core 10 named filters are available; add `[CrossTenant("")]` when `CrossTenantAttribute` exists in compilation.
+- `TenantEntityInfo.TenantFilterNames`: tracks which named filters reference the tenant property, enabling TL001 to compute non-tenant filter names for selective suggestions.
+- TL901 now also flags placeholder/empty reasons: `""`, `"TODO"`, `"reason"`, `"n/a"`, `"TODO: reason"`.
+- TL901/TL902 detection implemented via symbol actions on methods and named types.
+- EF Core 10 test infrastructure: `ReferenceAssemblies.Net.Net100` with EF Core 10.0.0 packages for analyzer test compilations.

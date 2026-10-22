@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp.Testing;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Testing;
@@ -14,8 +16,17 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
                 new PackageIdentity("Microsoft.EntityFrameworkCore", "8.0.8"),
                 new PackageIdentity("Microsoft.EntityFrameworkCore.Relational", "8.0.8")));
 
+    public static readonly ReferenceAssemblies Net100WithEfCore10 =
+        ReferenceAssemblies.Net.Net100.AddPackages(
+            ImmutableArray.Create(
+                new PackageIdentity("Microsoft.EntityFrameworkCore", "10.0.0"),
+                new PackageIdentity("Microsoft.EntityFrameworkCore.Relational", "10.0.0")));
+
     public static DiagnosticResult Diagnostic(string diagnosticId)
         => CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(diagnosticId);
+
+    public static DiagnosticResult Diagnostic(DiagnosticDescriptor descriptor)
+        => CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(descriptor);
 
     public static async Task VerifyAnalyzerAsync(string source, params DiagnosticResult[] expected)
     {
@@ -38,6 +49,17 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         await test.RunAsync(CancellationToken.None);
     }
 
+    public static async Task VerifyWithEfCore10Async(string source, params DiagnosticResult[] expected)
+    {
+        var test = new CSharpAnalyzerTest<TAnalyzer, DefaultVerifier>
+        {
+            TestCode = source,
+            ReferenceAssemblies = Net100WithEfCore10,
+        };
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
     public static async Task VerifyWithEfCoreAndOptionsAsync(
         string source,
         string editorconfigContent,
@@ -47,6 +69,79 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCore,
+        };
+        test.TestState.AnalyzerConfigFiles.Add(
+            ("/.editorconfig", editorconfigContent));
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    public static async Task VerifyWithEfCore10AndOptionsAsync(
+        string source,
+        string editorconfigContent,
+        params DiagnosticResult[] expected)
+    {
+        var test = new CSharpAnalyzerTest<TAnalyzer, DefaultVerifier>
+        {
+            TestCode = source,
+            ReferenceAssemblies = Net100WithEfCore10,
+        };
+        test.TestState.AnalyzerConfigFiles.Add(
+            ("/.editorconfig", editorconfigContent));
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+}
+
+public static class CSharpCodeFixVerifier<TAnalyzer, TCodeFix>
+    where TAnalyzer : DiagnosticAnalyzer, new()
+    where TCodeFix : CodeFixProvider, new()
+{
+    public static DiagnosticResult Diagnostic(string diagnosticId)
+        => CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(diagnosticId);
+
+    public static DiagnosticResult Diagnostic(DiagnosticDescriptor descriptor)
+        => CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(descriptor);
+
+    public static async Task VerifyCodeFixAsync(
+        string source,
+        DiagnosticResult[] expected,
+        string fixedSource,
+        ReferenceAssemblies? referenceAssemblies = null,
+        int codeActionIndex = 0,
+        string? equivalenceKey = null,
+        DiagnosticResult[]? remainingDiagnostics = null)
+    {
+        var test = new CSharpCodeFixTest<TAnalyzer, TCodeFix, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = referenceAssemblies ?? CSharpAnalyzerVerifier<TAnalyzer>.Net80WithEfCore,
+            CodeActionIndex = codeActionIndex,
+            CodeActionEquivalenceKey = equivalenceKey,
+        };
+        test.ExpectedDiagnostics.AddRange(expected);
+        if (remainingDiagnostics is not null)
+            test.FixedState.ExpectedDiagnostics.AddRange(remainingDiagnostics);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    public static async Task VerifyCodeFixWithOptionsAsync(
+        string source,
+        DiagnosticResult[] expected,
+        string fixedSource,
+        string editorconfigContent,
+        ReferenceAssemblies? referenceAssemblies = null,
+        int codeActionIndex = 0,
+        string? equivalenceKey = null)
+    {
+        var test = new CSharpCodeFixTest<TAnalyzer, TCodeFix, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = referenceAssemblies ?? CSharpAnalyzerVerifier<TAnalyzer>.Net80WithEfCore,
+            CodeActionIndex = codeActionIndex,
+            CodeActionEquivalenceKey = equivalenceKey,
         };
         test.TestState.AnalyzerConfigFiles.Add(
             ("/.editorconfig", editorconfigContent));

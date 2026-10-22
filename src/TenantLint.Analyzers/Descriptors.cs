@@ -16,6 +16,24 @@ internal static class Descriptors
         isEnabledByDefault: false,
         helpLinkUri: HelpLinkBase + "TL000.md");
 
+    public static readonly DiagnosticDescriptor TL001 = new(
+        id: "TL001",
+        title: "IgnoreQueryFilters() removes tenant filter",
+        messageFormat: "'{0}' query removes the tenant filter via IgnoreQueryFilters(). Use IgnoreQueryFilters([{1}]) to lift only the filter you need, or mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL001.md");
+
+    public static readonly DiagnosticDescriptor TL001NoSelective = new(
+        id: "TL001",
+        title: "IgnoreQueryFilters() removes tenant filter",
+        messageFormat: "'{0}' query removes the tenant filter via IgnoreQueryFilters(). Mark the method [CrossTenant(\"reason\")] to document intentional cross-tenant access.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL001.md");
+
     public static readonly DiagnosticDescriptor TL900 = new(
         id: "TL900",
         title: "Dynamic query filter detected",
