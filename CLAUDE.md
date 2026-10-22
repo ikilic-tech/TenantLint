@@ -118,6 +118,13 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
   - `EntityTypeBuilder<T>.HasQueryFilter(String filterKey, Expression<Func<T, bool>> filter)`
   - `EntityFrameworkQueryableExtensions.IgnoreQueryFilters<T>(IQueryable<T> source)` — parameterless (removes all)
   - `EntityFrameworkQueryableExtensions.IgnoreQueryFilters<T>(IQueryable<T> source, IReadOnlyCollection<string> filterKeys)` — selective
+- **Mixed unnamed + named filter behavior** *(Verified via EF Core 10 source and community demos — 2026-10-22)*:
+  - **Unnamed filters replace each other:** a second unnamed `HasQueryFilter` silently overwrites the first (same as EF Core 8/9).
+  - **Named filters coexist:** multiple `HasQueryFilter("Name", ...)` on the same entity all survive; both reach the SQL WHERE clause.
+  - **Mixing unnamed + named throws `InvalidOperationException`:** EF Core 10 does **not** allow an entity to have both unnamed and named filters. This means TL001's selective fix is safe — entities that use named filters will only have named filters.
+  - **Parameterless `IgnoreQueryFilters()`** removes all filters (named and unnamed).
+  - **Selective `IgnoreQueryFilters(["SoftDelete"])`** removes only the specified named filter; other named filters remain active.
+  - Sources: [codewithmukesh.com](https://codewithmukesh.com/blog/global-query-filters-efcore/), [gdhami-net/ef-named-query-filters-demo](https://github.com/gdhami-net/ef-named-query-filters-demo) (tested on EF Core 10.0.12).
 
 ## 5. Engineering rules
 
