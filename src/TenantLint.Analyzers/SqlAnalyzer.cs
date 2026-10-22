@@ -1,4 +1,8 @@
 using System.Collections.Immutable;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace TenantLint.Analyzers;
 
@@ -38,6 +42,10 @@ internal static class SqlAnalyzer
             "WHERE", "ON", "AND", "OR", "SELECT", "ORDER", "GROUP", "FROM", "JOIN",
             "HAVING", "SET", "UPDATE", "DELETE", "INSERT", "INTO", "VALUES", "INNER",
             "LEFT", "RIGHT", "OUTER", "CROSS", "FULL");
+
+    // ---------------------------------------------------------------
+    // SQL text analysis (table name matching + predicate heuristic)
+    // ---------------------------------------------------------------
 
     public static SqlAnalysisResult Analyze(
         string sql,
@@ -139,6 +147,153 @@ internal static class SqlAnalyzer
 
         return false;
     }
+
+    // ---------------------------------------------------------------
+    // SQL text extraction from IOperation / syntax trees
+    // ---------------------------------------------------------------
+
+    /// <summary>
+    /// Tries to extract a constant SQL string from a named parameter of an invocation.
+    /// </summary>
+    internal static bool TryExtractSqlFromInvocation(
+        IInvocationOperation invocation, string parameterName, out string sqlText)
+    {
+        sqlText = "";
+        foreach (var arg in invocation.Arguments)
+        {
+            if (arg.Parameter?.Name == parameterName)
+                return TryExtractSqlFromArgument(arg, out sqlText);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Tries to extract a constant SQL string from an argument operation,
+    /// using both IOperation analysis and syntax tree fallback.
+    /// </summary>
+    internal static bool TryExtractSqlFromArgument(IArgumentOperation argument, out string sqlText)
+    {
+        sqlText = "";
+        if (TryExtractSqlFromOperation(argument.Value, out sqlText))
+            return true;
+        return TryExtractSqlFromSyntax(argument, out sqlText);
+    }
+
+    private static bool TryExtractSqlFromOperation(IOperation operation, out string sqlText)
+    {
+        sqlText = "";
+
+        // Unwrap conversion operations
+        var value = operation;
+        while (value is IConversionOperation conversion)
+            value = conversion.Operand;
+
+        // Check for constant string
+        if (value.ConstantValue.HasValue && value.ConstantValue.Value is string constantSql)
+        {
+            sqlText = constantSql;
+            return true;
+        }
+
+        // Check for interpolated string
+        if (value is IInterpolatedStringOperation interpolated)
+            return TryBuildSqlFromInterpolation(interpolated, out sqlText);
+
+        // Handle FormattableString lowering: FormattableStringFactory.Create(format, args)
+        if (value is IInvocationOperation factoryCall &&
+            factoryCall.TargetMethod.Name == "Create" &&
+            factoryCall.TargetMethod.ContainingType?.Name == "FormattableStringFactory" &&
+            factoryCall.Arguments.Length >= 1)
+        {
+            var formatArg = factoryCall.Arguments[0].Value;
+            while (formatArg is IConversionOperation formatConversion)
+                formatArg = formatConversion.Operand;
+
+            if (formatArg.ConstantValue.HasValue && formatArg.ConstantValue.Value is string format)
+            {
+                sqlText = format;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildSqlFromInterpolation(IInterpolatedStringOperation interpolated, out string sqlText)
+    {
+        var sb = new StringBuilder();
+        var placeholderIndex = 0;
+        foreach (var part in interpolated.Parts)
+        {
+            if (part is IInterpolatedStringTextOperation textPart)
+            {
+                if (textPart.ConstantValue.HasValue && textPart.ConstantValue.Value is string text)
+                    sb.Append(text);
+            }
+            else
+            {
+                sb.Append('{').Append(placeholderIndex++).Append('}');
+            }
+        }
+
+        sqlText = sb.ToString();
+        return sqlText.Length > 0;
+    }
+
+    private static bool TryExtractSqlFromSyntax(IArgumentOperation argument, out string sqlText)
+    {
+        sqlText = "";
+
+        var syntax = argument.Syntax;
+        if (syntax is null)
+            return false;
+
+        // Find interpolated string in the argument's syntax subtree
+        var interpolatedSyntax = FindDescendantOrSelf<InterpolatedStringExpressionSyntax>(syntax);
+        if (interpolatedSyntax is not null)
+        {
+            var sb = new StringBuilder();
+            var placeholderIndex = 0;
+            foreach (var content in interpolatedSyntax.Contents)
+            {
+                if (content is InterpolatedStringTextSyntax textPart)
+                    sb.Append(textPart.TextToken.ValueText);
+                else if (content is InterpolationSyntax)
+                    sb.Append('{').Append(placeholderIndex++).Append('}');
+            }
+
+            sqlText = sb.ToString();
+            return sqlText.Length > 0;
+        }
+
+        // Check for a constant string literal
+        var literalSyntax = FindDescendantOrSelf<LiteralExpressionSyntax>(syntax);
+        if (literalSyntax is not null && literalSyntax.Token.Value is string literalText)
+        {
+            sqlText = literalText;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static T? FindDescendantOrSelf<T>(SyntaxNode node) where T : SyntaxNode
+    {
+        if (node is T match)
+            return match;
+
+        foreach (var child in node.DescendantNodes())
+        {
+            if (child is T childMatch)
+                return childMatch;
+        }
+
+        return null;
+    }
+
+    // ---------------------------------------------------------------
+    // Private helpers
+    // ---------------------------------------------------------------
 
     private static string? FindFirstTenantColumn(string sql, ImmutableHashSet<string> tenantColumnNames)
     {

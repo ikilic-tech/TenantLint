@@ -22,6 +22,16 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
                 new PackageIdentity("Microsoft.EntityFrameworkCore", "10.0.0"),
                 new PackageIdentity("Microsoft.EntityFrameworkCore.Relational", "10.0.0")));
 
+    public static readonly ReferenceAssemblies Net80WithEfCoreAndDapper =
+        Net80WithEfCore.AddPackages(
+            ImmutableArray.Create(
+                new PackageIdentity("Dapper", "2.1.35")));
+
+    public static readonly ReferenceAssemblies Net100WithEfCore10AndDapper =
+        Net100WithEfCore10.AddPackages(
+            ImmutableArray.Create(
+                new PackageIdentity("Dapper", "2.1.35")));
+
     public static DiagnosticResult Diagnostic(string diagnosticId)
         => CSharpAnalyzerVerifier<TAnalyzer, DefaultVerifier>.Diagnostic(diagnosticId);
 
@@ -55,6 +65,28 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10,
+        };
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    public static async Task VerifyWithDapperAsync(string source, params DiagnosticResult[] expected)
+    {
+        var test = new CSharpAnalyzerTest<TAnalyzer, DefaultVerifier>
+        {
+            TestCode = source,
+            ReferenceAssemblies = Net80WithEfCoreAndDapper,
+        };
+        test.ExpectedDiagnostics.AddRange(expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    public static async Task VerifyWithDapper10Async(string source, params DiagnosticResult[] expected)
+    {
+        var test = new CSharpAnalyzerTest<TAnalyzer, DefaultVerifier>
+        {
+            TestCode = source,
+            ReferenceAssemblies = Net100WithEfCore10AndDapper,
         };
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);

@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Linq;
-using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -29,6 +28,8 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL001NoSelective,
             Descriptors.TL002,
             Descriptors.TL002Filtered,
+            Descriptors.TL003,
+            Descriptors.TL003Filtered,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -68,11 +69,16 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             var hasCrossTenantAttribute = HasCrossTenantAttributeInCompilation(
                 compilation, options.CrossTenantAttribute);
 
-            // TL001 + TL002: Register single invocation operation action
+            // TL001 + TL002 + TL003: Register single invocation operation action
             var relationalDbFacadeExtensions = compilation.GetTypeByMetadataName(
                 "Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions");
 
-            if (efQueryableExtensions is not null || relationalDbFacadeExtensions is not null)
+            var dapperSqlMapper = compilation.GetTypeByMetadataName("Dapper.SqlMapper");
+            var dapperCommandDefinition = compilation.GetTypeByMetadataName("Dapper.CommandDefinition");
+
+            if (efQueryableExtensions is not null ||
+                relationalDbFacadeExtensions is not null ||
+                dapperSqlMapper is not null)
             {
                 compilationStartContext.RegisterOperationAction(
                     operationContext =>
@@ -87,6 +93,12 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                         {
                             AnalyzeRawSqlInvocation(
                                 operationContext, model, options, relationalDbFacadeExtensions);
+                        }
+                        if (dapperSqlMapper is not null)
+                        {
+                            AnalyzeDapperInvocation(
+                                operationContext, model, options,
+                                dapperSqlMapper, dapperCommandDefinition);
                         }
                     },
                     OperationKind.Invocation);
@@ -211,9 +223,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         if (!RawSqlMethodNames.Contains(targetMethod.Name))
             return;
 
-        // Check this is RelationalDatabaseFacadeExtensions (extension method).
-        // For methods taking FormattableString, the compiler may resolve
-        // the extension method differently — check both ReducedFrom and original.
+        // Check this is RelationalDatabaseFacadeExtensions (extension method)
         var originalMethod = targetMethod.ReducedFrom ?? targetMethod;
         var containingType = originalMethod.ContainingType;
         if (containingType is null ||
@@ -225,18 +235,31 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             return;
 
         // Extract SQL text
-        if (!TryExtractSqlText(invocation, out var sqlText))
+        if (!SqlAnalyzer.TryExtractSqlFromInvocation(invocation, "sql", out var sqlText))
             return;
 
-        // Analyze the SQL
+        ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
+            Descriptors.TL002, Descriptors.TL002Filtered);
+    }
+
+    private static void ReportRawSqlDiagnostic(
+        OperationAnalysisContext context,
+        IInvocationOperation invocation,
+        string sqlText,
+        TenantModel model,
+        ConfigOptions options,
+        DiagnosticDescriptor warningDescriptor,
+        DiagnosticDescriptor infoDescriptor)
+    {
         var result = SqlAnalyzer.Analyze(sqlText, model, options);
         if (!result.HasTenantTableReference)
             return;
 
-        // Choose descriptor based on predicate heuristic
         var descriptor = result.HasTenantColumnInPredicate
-            ? Descriptors.TL002Filtered
-            : Descriptors.TL002;
+            ? infoDescriptor
+            : warningDescriptor;
+
+        var methodName = invocation.TargetMethod.Name;
 
         // Narrow location to the method name token
         var location = invocation.Syntax is InvocationExpressionSyntax invocationSyntax
@@ -251,169 +274,134 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
 
         var diagnostic = effectiveSeverity.HasValue
             ? Diagnostic.Create(
-                descriptor,
-                location,
-                effectiveSeverity.Value,
-                additionalLocations: null,
-                properties: null,
-                targetMethod.Name,
-                result.MatchedTableName,
-                result.MatchedColumnName)
+                descriptor, location, effectiveSeverity.Value,
+                additionalLocations: null, properties: null,
+                methodName, result.MatchedTableName, result.MatchedColumnName)
             : Diagnostic.Create(
-                descriptor,
-                location,
-                targetMethod.Name,
-                result.MatchedTableName,
-                result.MatchedColumnName);
+                descriptor, location,
+                methodName, result.MatchedTableName, result.MatchedColumnName);
 
         context.ReportDiagnostic(diagnostic);
     }
 
-    private static bool TryExtractSqlText(IInvocationOperation invocation, out string sqlText)
+    private static void AnalyzeDapperInvocation(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol dapperSqlMapper,
+        INamedTypeSymbol? dapperCommandDefinition)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        // Check method name starts with Query or Execute (covers all Dapper SQL methods)
+        if (!IsDapperSqlMethod(targetMethod.Name))
+            return;
+
+        // Check containing type is Dapper.SqlMapper
+        var originalMethod = targetMethod.ReducedFrom ?? targetMethod;
+        var containingType = originalMethod.ContainingType;
+        if (containingType is null ||
+            !containingType.Equals(dapperSqlMapper, SymbolEqualityComparer.Default))
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Try to extract SQL from "sql" parameter (string overloads)
+        if (SqlAnalyzer.TryExtractSqlFromInvocation(invocation, "sql", out var sqlText))
+        {
+            ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
+                Descriptors.TL003, Descriptors.TL003Filtered);
+            return;
+        }
+
+        // Try to extract SQL from CommandDefinition parameter
+        if (dapperCommandDefinition is not null &&
+            TryExtractSqlFromCommandDefinitionArg(invocation, dapperCommandDefinition, out sqlText))
+        {
+            ReportRawSqlDiagnostic(context, invocation, sqlText, model, options,
+                Descriptors.TL003, Descriptors.TL003Filtered);
+        }
+    }
+
+    private static bool TryExtractSqlFromCommandDefinitionArg(
+        IInvocationOperation invocation,
+        INamedTypeSymbol commandDefinitionType,
+        out string sqlText)
     {
         sqlText = "";
 
-        // Find the sql parameter argument
-        IArgumentOperation? sqlArg = null;
         foreach (var arg in invocation.Arguments)
         {
-            if (arg.Parameter?.Name == "sql")
+            if (arg.Parameter?.Name != "command")
+                continue;
+
+            var creation = FindObjectCreation(arg.Value);
+
+            // If not found directly, try following local variable declaration via syntax
+            if (creation is null && arg.Value is ILocalReferenceOperation localRef)
             {
-                sqlArg = arg;
-                break;
+                creation = FindLocalVariableCreation(localRef);
             }
+
+            if (creation is not null &&
+                creation.Type?.Equals(commandDefinitionType, SymbolEqualityComparer.Default) == true)
+            {
+                foreach (var ctorArg in creation.Arguments)
+                {
+                    if (ctorArg.Parameter?.Name == "commandText")
+                        return SqlAnalyzer.TryExtractSqlFromArgument(ctorArg, out sqlText);
+                }
+            }
+
+            break;
         }
 
-        if (sqlArg is null)
-            return false;
-
-        // Try IOperation-based extraction first
-        if (TryExtractSqlFromOperation(sqlArg.Value, out sqlText))
-            return true;
-
-        // Fallback: extract from syntax (handles cases where IOperation lowers
-        // interpolated strings to FormattableStringFactory.Create or other patterns)
-        return TryExtractSqlFromSyntax(sqlArg, out sqlText);
+        return false;
     }
 
-    private static bool TryExtractSqlFromOperation(IOperation operation, out string sqlText)
+    private static IObjectCreationOperation? FindObjectCreation(IOperation operation)
     {
-        sqlText = "";
-
-        // Unwrap conversion operations
         var value = operation;
-        while (value is IConversionOperation conversion)
-            value = conversion.Operand;
-
-        // Check for constant string
-        if (value.ConstantValue.HasValue && value.ConstantValue.Value is string constantSql)
-        {
-            sqlText = constantSql;
-            return true;
-        }
-
-        // Check for interpolated string
-        if (value is IInterpolatedStringOperation interpolated)
-        {
-            return TryBuildSqlFromInterpolation(interpolated, out sqlText);
-        }
-
-        // Handle FormattableString lowering: FormattableStringFactory.Create(format, args)
-        if (value is IInvocationOperation factoryCall &&
-            factoryCall.TargetMethod.Name == "Create" &&
-            factoryCall.TargetMethod.ContainingType?.Name == "FormattableStringFactory" &&
-            factoryCall.Arguments.Length >= 1)
-        {
-            var formatArg = factoryCall.Arguments[0].Value;
-            while (formatArg is IConversionOperation formatConversion)
-                formatArg = formatConversion.Operand;
-
-            if (formatArg.ConstantValue.HasValue && formatArg.ConstantValue.Value is string format)
-            {
-                sqlText = format;
-                return true;
-            }
-        }
-
-        return false;
+        while (value is IConversionOperation conv)
+            value = conv.Operand;
+        return value as IObjectCreationOperation;
     }
 
-    private static bool TryBuildSqlFromInterpolation(IInterpolatedStringOperation interpolated, out string sqlText)
+    private static IObjectCreationOperation? FindLocalVariableCreation(ILocalReferenceOperation localRef)
     {
-        var sb = new StringBuilder();
-        var placeholderIndex = 0;
-        foreach (var part in interpolated.Parts)
+        // Walk the syntax to find the variable declarator and its initializer
+        var localSymbol = localRef.Local;
+        foreach (var syntaxRef in localSymbol.DeclaringSyntaxReferences)
         {
-            if (part is IInterpolatedStringTextOperation textPart)
+            var declaratorSyntax = syntaxRef.GetSyntax();
+            if (declaratorSyntax is VariableDeclaratorSyntax declarator &&
+                declarator.Initializer?.Value is ObjectCreationExpressionSyntax or
+                    ImplicitObjectCreationExpressionSyntax)
             {
-                if (textPart.ConstantValue.HasValue && textPart.ConstantValue.Value is string text)
-                    sb.Append(text);
-            }
-            else
-            {
-                sb.Append('{').Append(placeholderIndex++).Append('}');
-            }
-        }
-
-        sqlText = sb.ToString();
-        return sqlText.Length > 0;
-    }
-
-    private static bool TryExtractSqlFromSyntax(IArgumentOperation argument, out string sqlText)
-    {
-        sqlText = "";
-
-        // Walk the syntax tree to find an interpolated string expression
-        var syntax = argument.Syntax;
-        if (syntax is null)
-            return false;
-
-        // Find the interpolated string in the argument's syntax subtree
-        var interpolatedSyntax = FindDescendantOrSelf<InterpolatedStringExpressionSyntax>(syntax);
-        if (interpolatedSyntax is not null)
-        {
-            var sb = new StringBuilder();
-            var placeholderIndex = 0;
-            foreach (var content in interpolatedSyntax.Contents)
-            {
-                if (content is InterpolatedStringTextSyntax textPart)
+                // Find the matching IOperation in the parent block
+                var semanticModel = localRef.SemanticModel;
+                if (semanticModel is not null)
                 {
-                    sb.Append(textPart.TextToken.ValueText);
-                }
-                else if (content is InterpolationSyntax)
-                {
-                    sb.Append('{').Append(placeholderIndex++).Append('}');
+                    var initOp = semanticModel.GetOperation(declarator.Initializer.Value);
+                    if (initOp is IObjectCreationOperation creation)
+                        return creation;
+                    // Unwrap conversion
+                    if (initOp is IConversionOperation convOp &&
+                        convOp.Operand is IObjectCreationOperation innerCreation)
+                        return innerCreation;
                 }
             }
-
-            sqlText = sb.ToString();
-            return sqlText.Length > 0;
-        }
-
-        // Check for a constant string in syntax (e.g., string literal argument)
-        var literalSyntax = FindDescendantOrSelf<LiteralExpressionSyntax>(syntax);
-        if (literalSyntax is not null && literalSyntax.Token.Value is string literalText)
-        {
-            sqlText = literalText;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static T? FindDescendantOrSelf<T>(SyntaxNode node) where T : SyntaxNode
-    {
-        if (node is T match)
-            return match;
-
-        foreach (var child in node.DescendantNodes())
-        {
-            if (child is T childMatch)
-                return childMatch;
         }
 
         return null;
     }
+
+    private static bool IsDapperSqlMethod(string methodName) =>
+        methodName.StartsWith("Query", StringComparison.Ordinal) ||
+        methodName.StartsWith("Execute", StringComparison.Ordinal);
 
     private static bool IsExemptByCrossTenant(ISymbol? containingSymbol, string crossTenantAttributeName)
     {

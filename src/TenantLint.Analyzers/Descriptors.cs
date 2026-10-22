@@ -52,6 +52,24 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL002.md");
 
+    public static readonly DiagnosticDescriptor TL003 = new(
+        id: "TL003",
+        title: "Dapper raw SQL references tenant table without tenant filtering",
+        messageFormat: "'{0}' references tenant table '{1}' in raw SQL without apparent tenant filtering. Ensure the query includes WHERE {2} = @param or mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL003.md");
+
+    public static readonly DiagnosticDescriptor TL003Filtered = new(
+        id: "TL003",
+        title: "Dapper raw SQL references tenant table with possible tenant filtering",
+        messageFormat: "'{0}' references tenant table '{1}' in raw SQL. Tenant column '{2}' appears in a predicate clause, but verify the filter is correct.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL003.md");
+
     public static readonly DiagnosticDescriptor TL900 = new(
         id: "TL900",
         title: "Dynamic query filter detected",
