@@ -9,7 +9,7 @@
 
     <!-- NuGet metadata -->
     <PackageId>TenantLint.Analyzers</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.0-preview.1</Version>
     <Authors>Ibrahim Kilic</Authors>
     <Description>Roslyn analyzers that catch cross-tenant data leaks in multi-tenant .NET applications at build time.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

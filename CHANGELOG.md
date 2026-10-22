@@ -33,3 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **TL005** (Warning): detects tenant-scoped entities (by convention: `DbSet<T>` where `T` has a tenant property) that have no explicit `HasQueryFilter` referencing the tenant property. Reported on the `DbSet<T>` property in the DbContext. Entities with inherited filters from a base type are not flagged. For `FilterState.Unknown` entities (dynamic filter loop detected), reports as **TL105** (Info) instead.
 - TL005 code fix: inserts `modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == TODO_SET_TENANT_ACCESSOR);` into `OnModelCreating` (creates override if missing). Intentionally produces CS0103 to force the developer to provide a real tenant accessor. Not offered when the entity is configured via `IEntityTypeConfiguration<T>`.
 - Separate diagnostic IDs for Info-severity variants: TL102 (was TL002 Info), TL103 (was TL003 Info), TL105 (TL005 dynamic filter variant).
+- `samples/SampleSaaS`: sample console app with one deliberate violation per rule (TL001, TL002, TL003, TL005). Build output demonstrates all diagnostics.
+- CI: sample build step verifies expected diagnostic IDs appear in build output.
+- README: problem statement, install, full rule table (including TL1xx and TL9xx), configuration, AI agent usage, comparison table, vision statement.
+- NuGet package `TenantLint.Analyzers` 0.1.0-preview.1: analyzer-only package (`analyzers/dotnet/cs`, no `lib/`), `DevelopmentDependency`, README included.

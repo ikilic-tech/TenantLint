@@ -1,0 +1,2 @@
+[*.cs]
+tenantlint.global_entities = Tenant, Country
