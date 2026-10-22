@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-preview.2] - 2026-10-23
+
+### Fixed
+
+- Repository and help links pointed to the wrong GitHub owner (`ibrahimkilic` → `ikilic-tech`).
+
 ## [0.1.0-preview.1] - 2026-10-23
 
 ### Rules
@@ -34,5 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - NuGet package [`TenantLint.Analyzers`](https://www.nuget.org/packages/TenantLint.Analyzers) — analyzer-only (`analyzers/dotnet/cs`), `DevelopmentDependency`, MIT license.
 - Supports EF Core 8+ and EF Core 10 named filters.
 
-[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.1...HEAD
+[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.2...HEAD
+[0.1.0-preview.2]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.1...v0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/ikilic-tech/TenantLint/releases/tag/v0.1.0-preview.1

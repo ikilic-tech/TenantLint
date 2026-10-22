@@ -9,12 +9,12 @@
 
     <!-- NuGet metadata -->
     <PackageId>TenantLint.Analyzers</PackageId>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.1.0-preview.2</Version>
     <Authors>Ibrahim Kilic</Authors>
     <Description>Roslyn analyzers that catch cross-tenant data leaks in multi-tenant .NET applications at build time.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/ibrahimkilic/TenantLint</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ibrahimkilic/TenantLint</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ikilic-tech/TenantLint</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ikilic-tech/TenantLint</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>roslyn;analyzer;multi-tenant;tenant;isolation;ef-core;security</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
