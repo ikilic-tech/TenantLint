@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-preview.3] - 2026-10-24
+
 ### Rules
 
-- **TL004** (Warning) / **TL104** (Info): detects parameters whose name matches tenant property names and that are bound from client input (`[FromHeader]`, `[FromQuery]`, `[FromForm]` → TL004 Warning; `[FromRoute]` → TL104 Info), and direct `Request.Headers["X-Tenant-Id"]` / `Request.Headers.TryGetValue(...)` / `Request.Query["tenantId"]` reads where the key matches a tenant property name. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL004.md)
+- **TL004** (Warning) / **TL104** (Info): detects parameters whose name matches tenant property names and that are bound from client input (`[FromHeader]`, `[FromQuery]`, `[FromForm]` → TL004 Warning; `[FromRoute]` → TL104 Info), and direct `Request.Headers["X-Tenant-Id"]` / `Request.Headers.TryGetValue(...)` / `Request.Query["tenantId"]` / `Request.Query.TryGetValue(...)` / `Request.Form["tenantId"]` / `Request.Form.TryGetValue(...)` reads where the key matches a tenant property name. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL004.md)
 - **TL006** (Warning): detects `IMemoryCache` / `IDistributedCache` / `HybridCache` set/get calls whose key does not include a tenant identifier, inside a method that also touches tenant-scoped data. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL006.md)
-- **TL007** (Warning): detects tenant context stored in a `static` field or property — tenant values in static fields are shared across all requests and tenants. Excludes `AsyncLocal<T>`, `IHttpContextAccessor`, and other known async-local-backed types. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL007.md)
+- **TL007** (Warning): detects tenant context stored in a `static` field or property — tenant values in static fields are shared across all requests and tenants. Excludes `AsyncLocal<T>`, `IHttpContextAccessor`, and other known async-local-backed types. Static `readonly` fields are only reported for tenant-context abstractions (not DTOs/settings). [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL007.md)
 - **TL008** (Info): detects `BackgroundService` / `IHostedService` that uses a DbContext with tenant-scoped entities without creating a scope or setting the tenant context. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL008.md)
 - **TL009** (Warning): detects PostgreSQL RLS session variables set with `SET app.x` / `set_config(..., false)` instead of `SET LOCAL` / `set_config(..., true)` — values persist across pooled connections. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL009.md)
 - **TL010** (Warning): detects tenant-scoped entity types bound directly from the request body via `[FromBody]`, `[FromForm]`, implicit body binding on `[ApiController]`, or minimal API `MapPost`/`MapPut`/`MapPatch` handlers (lambda and method-group). A client can set the tenant property to any value. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL010.md)
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TL005 code fix: use the actual `OnModelCreating` parameter name instead of hardcoding `modelBuilder`.
 - TL005 code fix: generate named `HasQueryFilter("Tenant", ...)` when the DbContext uses EF Core 10 named filters or `tenantlint.tenant_filter_name` is configured.
 - TL005 code fix: avoid lambda parameter name collision with identifiers already in scope.
+- TL007: narrowed static `readonly` field heuristic — DTOs, settings, options, and themes are no longer false positives.
 
 ### Configuration
 
@@ -67,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - NuGet package [`TenantLint.Analyzers`](https://www.nuget.org/packages/TenantLint.Analyzers) — analyzer-only (`analyzers/dotnet/cs`), `DevelopmentDependency`, MIT license.
 - Supports EF Core 8+ and EF Core 10 named filters.
 
-[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.2...HEAD
+[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.3...HEAD
+[0.1.0-preview.3]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.2...v0.1.0-preview.3
 [0.1.0-preview.2]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.1...v0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/ikilic-tech/TenantLint/releases/tag/v0.1.0-preview.1
