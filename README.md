@@ -159,6 +159,31 @@ No MCP server setup is required. The analyzer works through standard build outpu
 | **Knara.MultiTenant.IsolationEnforcer** | Roslyn analyzer, but requires its own base classes and repository pattern | TenantLint is framework-agnostic — works with any EF Core setup. |
 | **mcp-tenant-isolation** | TypeScript CLI with 57 rules for Node.js apps | No .NET support. TenantLint covers the .NET ecosystem. |
 
+## Validation
+
+Tested against 6 open-source multi-tenant .NET projects covering hand-rolled
+`HasQueryFilter`, Finbuckle, ABP Framework, and dynamic filter patterns:
+
+| Project | Approach | Diagnostics | TP | FP |
+|---------|----------|-------------|----|----|
+| [PlatformPlatform](https://github.com/nicdev/PlatformPlatform) | Dynamic named filters | 3 TL001 | 3 | 0 |
+| [fullstackhero starter-kit](https://github.com/nicdev/fullstackhero-dotnet-microservices-boilerplate) | Finbuckle + explicit | 2 TL001, 6 TL005, 1 TL007 | 8 | 1 |
+| [ABP BookStore](https://github.com/nicdev/abp-samples) | ABP `IMultiTenant` | 0 | 0 | 0 |
+| [EntityFrameworkCoreMultiTenancy](https://github.com/khalidabuhakmeh/EntityFrameworkCoreMultiTenancy) | Hand-rolled | 1 TL004 | 1 | 0 |
+| [saas-starter-dotnet](https://github.com/arslanahmadpk/saas-starter-dotnet) | Dynamic reflection | 2 TL001 | 2 | 0 |
+| [MultiTenant](https://github.com/bibekpandey0521/MultiTenant) | Finbuckle + Identity | 0 | 0 | 0 |
+| **Total** | | **15** | **14** | **1** |
+
+**Warning-severity false positive rate: 6.7%** (1 of 15). The single FP is a TL007
+heuristic match on a static DTO default field in a class named `TenantThemeDto`.
+
+Three of the six projects were initially used to guide development (Rounds 1–2). The
+other three were held out until all rules were implemented. The held-out projects were
+re-run after fixing two detection gaps they revealed (dynamic filter recognition and
+`Request.Query.TryGetValue()` coverage). Two of the three held-out projects are small
+single-DbContext demos. Full results are in
+[`docs/validation/`](docs/validation/2026-10-oss-validation.md).
+
 ## Vision
 
 TenantLint is the first piece of a broader compile-time safety layer for AI-written code in multi-tenant applications. As AI agents write more production code, the gap between "code that compiles" and "code that is correct" grows. Analyzers that run on every build are the most natural checkpoint — they require no setup from the agent, produce structured feedback, and integrate with every .NET tool from Visual Studio to CI pipelines. TenantLint starts with tenant isolation because it is the highest-stakes correctness property in multi-tenant SaaS: a single missing filter can expose every customer's data.
