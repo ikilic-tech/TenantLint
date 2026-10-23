@@ -46,7 +46,18 @@ EF6 and .NET Framework projects are not supported.
 | [TL001](docs/rules/TL001.md) | Warning | `IgnoreQueryFilters()` on tenant-scoped entity removes tenant filter | Rewrite to selective `IgnoreQueryFilters(["..."])` (EF 10+), or add `[CrossTenant]` | [TL001](docs/rules/TL001.md) |
 | [TL002](docs/rules/TL002.md) | Warning | EF Core raw SQL (`ExecuteSqlRaw`, `SqlQuery`, etc.) references tenant table without tenant WHERE clause | -- | [TL002](docs/rules/TL002.md) |
 | [TL003](docs/rules/TL003.md) | Warning | Dapper `SqlMapper` call references tenant table without tenant WHERE clause | -- | [TL003](docs/rules/TL003.md) |
+| [TL004](docs/rules/TL004.md) | Warning | Tenant identity received from client input (`[FromHeader]`, `[FromQuery]`, `[FromForm]`, direct header/query reads) | -- | [TL004](docs/rules/TL004.md) |
 | [TL005](docs/rules/TL005.md) | Warning | Tenant-scoped entity exposed as `DbSet<T>` has no `HasQueryFilter` | Inserts `HasQueryFilter` stub into `OnModelCreating` | [TL005](docs/rules/TL005.md) |
+| [TL006](docs/rules/TL006.md) | Warning | Cache key does not include tenant identifier (`IMemoryCache`, `IDistributedCache`, `HybridCache`) | -- | [TL006](docs/rules/TL006.md) |
+| [TL007](docs/rules/TL007.md) | Warning | Tenant context stored in `static` field/property — shared across all requests | -- | [TL007](docs/rules/TL007.md) |
+| [TL008](docs/rules/TL008.md) | Info | Background service uses tenant-scoped DbContext without creating a scope | -- | [TL008](docs/rules/TL008.md) |
+| [TL009](docs/rules/TL009.md) | Warning | RLS session variable (`SET app.x` / `set_config(..., false)`) uses session scope — leaks across pooled connections | -- | [TL009](docs/rules/TL009.md) |
+| [TL010](docs/rules/TL010.md) | Warning | Tenant-scoped entity bound directly from request body (over-posting) | -- | [TL010](docs/rules/TL010.md) |
+| [TL011](docs/rules/TL011.md) | Warning | Pooled DbContext has tenant filter rooted in constructor-only field | -- | [TL011](docs/rules/TL011.md) |
+| [TL012](docs/rules/TL012.md) | Warning | `HasQueryFilter` lambda references a value not rooted in the DbContext instance | -- | [TL012](docs/rules/TL012.md) |
+| [TL013](docs/rules/TL013.md) | Warning | Raw ADO.NET SQL references tenant table without tenant filtering | -- | [TL013](docs/rules/TL013.md) |
+| [TL014](docs/rules/TL014.md) | Warning | ABP tenant-filter bypass (`IDataFilter.Disable<IMultiTenant>()`, `ICurrentTenant.Change()`) | -- | [TL014](docs/rules/TL014.md) |
+| [TL015](docs/rules/TL015.md) | Warning | Finbuckle `TenantMismatchMode.Ignore` allows cross-tenant writes | -- | [TL015](docs/rules/TL015.md) |
 
 > **Caution — Fix All:** "Fix All in Project/Solution" changes runtime behavior. Mark intentional cross-tenant methods with `[CrossTenant("reason")]` first, then apply the fix to the rest.
 
@@ -58,7 +69,18 @@ These diagnostics share documentation with their parent rule but fire at **Info*
 |----|--------|--------------|
 | TL102 | TL002 | Raw SQL references tenant table, but a tenant column appears in a predicate clause — verify manually |
 | TL103 | TL003 | Same as TL102, for Dapper calls |
+| TL104 | TL004 | Tenant identity from `[FromRoute]` — legitimate pattern when authorized against claims |
 | TL105 | TL005 | Entity may be missing a tenant filter, but a dynamic filter loop was detected — verify manually |
+| TL111 | TL011 | Tenant filter references constructor-only field — unsafe if pooling is introduced (opt-in, disabled by default) |
+| TL113 | TL013 | Same as TL102, for raw ADO.NET calls |
+
+### Anti-tamper diagnostics
+
+| ID | Severity | What it detects |
+|----|----------|----------------|
+| TL201 | Warning | `#pragma warning disable TLxxx` without a justification comment |
+| TL202 | Warning | `[SuppressMessage]` targeting a TL rule without a `Justification` |
+| TL203 | Warning | TL rules globally disabled via `<NoWarn>` or `.editorconfig` `severity = none` |
 
 ### Supplementary diagnostics
 
@@ -88,6 +110,12 @@ tenantlint.tenant_filter_name    = Tenant
 
 # Attribute that marks intentional cross-tenant access
 tenantlint.cross_tenant_attribute = CrossTenant
+
+# DbContext bases (external) known to apply tenant filters
+tenantlint.filtered_base_types   = MyCompany.Data.TenantDbContextBase
+
+# Interfaces marking entities as tenant-scoped
+tenantlint.tenant_marker_interfaces = ITenantEntity, IMustHaveTenant
 ```
 
 Change severity per rule with the standard EditorConfig syntax:
