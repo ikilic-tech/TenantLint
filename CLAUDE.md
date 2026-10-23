@@ -84,7 +84,7 @@ tenantlint.cross_tenant_attribute = CrossTenant                            # att
 Users can also change severity per rule with the standard `dotnet_diagnostic.TL001.severity = error`.
 
 ### Intentional cross-tenant access
-Any **method** decorated with an attribute whose **simple name** is `CrossTenant` / `CrossTenantAttribute` (any namespace; we do not ship a runtime package) is exempt from TL001–TL003 for diagnostics within that method. Class-level `[CrossTenant]` exempts all methods but emits TL902 (Warning): "Class-level [CrossTenant] suppresses tenant checks for all methods — prefer method-level suppression." The attribute should take a reason string; if it is missing or empty, report TL901 (Info): "[CrossTenant] should provide a reason." The README shows users a 3-line attribute to copy into their codebase.
+Any **method** decorated with an attribute whose **simple name** is `CrossTenant` / `CrossTenantAttribute` (any namespace; we do not ship a runtime package) is exempt from TL001–TL004 and TL010–TL013 for diagnostics within that method. Class-level `[CrossTenant]` exempts all methods but emits TL902 (Warning): "Class-level [CrossTenant] suppresses tenant checks for all methods — prefer method-level suppression." The attribute should take a reason string; if it is missing or empty, report TL901 (Info): "[CrossTenant] should provide a reason." The README shows users a 3-line attribute to copy into their codebase.
 
 ## 4. Rules
 
@@ -109,6 +109,12 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 | ID | Severity | Detects |
 |---|---|---|
 | **TL004** | Warning | Tenant identity taken from client input in ASP.NET Core: action/endpoint parameters whose name matches the tenant property list and that are bound `[FromHeader]`, `[FromQuery]`, `[FromRoute]`, `[FromForm]`; `Request.Headers["X-Tenant-Id"]`-style reads. Data-flow tracking (whether the value reaches a query) is deferred to v0.3; v0.2 reports the binding source regardless. |
+| **TL010** | Warning | Tenant-scoped entity bound directly from the request body in ASP.NET Core (over-posting). Detects `[FromBody]`, `[FromForm]`, and implicit body-binding on `[ApiController]` actions where the parameter type is a tenant-scoped entity. A client can set the tenant property to any value. |
+| **TL011** | Warning | `HasQueryFilter` lambda whose tenant value is rooted in a field only assigned in the constructor, at `AddDbContextPool` / `AddPooledDbContextFactory` registration site. Pooled instances reuse the first tenant's value. |
+| **TL111** | Info (disabled) | Same detection as TL011, but fires on the DbContext type itself — regardless of how it is registered — as a heads-up that the pattern is unsafe if pooling is ever introduced. Opt-in via `.editorconfig`. |
+| **TL012** | Warning | `HasQueryFilter` lambda whose tenant value is not rooted in the DbContext instance (locals, static fields/properties, static method calls). EF Core caches the model — the first value is baked in and reused for every tenant. |
+| **TL013** | Warning | Raw ADO.NET SQL (`DbCommand.CommandText`, DbCommand-derived constructor) references tenant table without apparent tenant filtering. Same SQL analysis as TL002/TL003. |
+| **TL113** | Info | Same detection as TL013, but tenant column appears in a predicate clause — verify manually. |
 | **TL006** | Warning | `IMemoryCache` / `IDistributedCache` / `HybridCache` set/get/`GetOrCreate*` calls whose key is a constant or an interpolation with no tenant-related value, inside a method that also touches tenant-scoped data. |
 | **TL007** | Warning | Tenant context stored in a `static` field/property, or a type whose name contains `Tenant` (e.g. `ITenantContext`, `ICurrentTenant`) registered as `AddSingleton`. Also a singleton capturing a scoped tenant service in its constructor. |
 | **TL008** | Info | `BackgroundService` / `IHostedService` / Hangfire job methods that resolve or inject a DbContext with tenant-scoped entities without creating a scope / setting the tenant first. Heuristic → Info by default. |
@@ -152,6 +158,9 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
   - **Regular LINQ (`ToList()`) after tracking cross-tenant entity:** Query filter still applies to the database query. Tracked cross-tenant entities are NOT included in LINQ results. **Safe.**
   - **Key insight:** `Find`/`FindAsync` is a two-step operation: (1) check change tracker, (2) query database. Step 1 does NOT apply query filters. This is by design (documented behavior) but is a tenant isolation hazard when cross-tenant entities enter the change tracker via `IgnoreQueryFilters()`, raw SQL, or manual `Attach`/`Entry` calls.
   - Results identical on EF Core 8 and 10.
+- **TL012/TL011/TL111 design** *(Implemented — 2026-10-22)*: TL012 detects values not rooted in `this`; TL011 detects constructor-only fields at pool registration sites; TL111 (Info, **disabled by default**) fires on the DbContext type itself. "Constructor-only" = `readonly` OR only assigned inside constructor bodies.
+- **Find/FindAsync:** Documented as a pitfall in TL001.md; no separate rule. Find checks the change tracker first and does not apply query filters to tracked entities.
+- **Scope:** TenantLint targets **shared-database (row-level) multi-tenancy**. Database-per-tenant and schema-per-tenant are out of scope.
 
 ## 5. Engineering rules
 
@@ -164,6 +173,19 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 - **Every rule has** a `docs/rules/TLxxx.md` page with: what, why it leaks, bad/good code, how to suppress, false-positive notes.
 - **Commits:** Conventional Commits (`feat(TL001): …`, `test: …`, `docs: …`). One rule per PR.
 - Public code, comments, docs and messages are **in English**.
+
+## 5a. Working agreement: CLAUDE.md is the source of truth
+
+- Any new rule, rule change, design decision, or verified EF Core/Roslyn
+  behavior that the maintainer gives in chat MUST be written into
+  CLAUDE.md BEFORE implementation starts, in the same commit as the first
+  related change or in a preceding "docs:" commit.
+- If a prompt references a rule ID, setting, or decision that is not in
+  CLAUDE.md, stop and ask for its definition — never guess.
+- Verification results (spikes) are recorded in CLAUDE.md with the
+  package versions and date.
+- At the end of each milestone, check that CLAUDE.md matches the code
+  (rules table, IDs, severities, milestones) and fix any drift.
 
 ## 6. Sample app (`samples/SampleSaaS`)
 

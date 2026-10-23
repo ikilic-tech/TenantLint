@@ -30,6 +30,11 @@ No configuration required. Works with plain EF Core `HasQueryFilter`, Finbuckle,
 
 EF6 and .NET Framework projects are not supported.
 
+> **Scope:** TenantLint targets shared-database (row-level) multi-tenancy —
+> where all tenants share tables and isolation comes from query filters or
+> WHERE clauses. Database-per-tenant and schema-per-tenant architectures
+> are out of scope.
+
 ## Demo
 
 ![TenantLint in action](docs/assets/demo.gif)
