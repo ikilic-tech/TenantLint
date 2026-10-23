@@ -73,7 +73,7 @@ internal static class Descriptors
     public static readonly DiagnosticDescriptor TL004 = new(
         id: "TL004",
         title: "Tenant identity received from client input",
-        messageFormat: "Parameter '{0}' receives the tenant identity from client input ({1}). Derive the tenant from a trusted source (JWT claim, authenticated session) instead, or mark the method [CrossTenant(\"reason\")].",
+        messageFormat: "'{0}' receives the tenant identity from client input ({1}). Derive the tenant from a trusted source (JWT claim, authenticated session) instead, or mark the method [CrossTenant(\"reason\")].",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,

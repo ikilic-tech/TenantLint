@@ -132,6 +132,20 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                     SymbolKind.Method);
             }
 
+            // TL004: Detect direct header/query reads for tenant values
+            if (aspNetTypes.HasHeaderOrQuery)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeDirectHeaderQueryAccess(
+                        operationContext, options, aspNetTypes),
+                    OperationKind.PropertyReference);
+
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeTryGetValueCall(
+                        operationContext, options, aspNetTypes),
+                    OperationKind.Invocation);
+            }
+
             // TL010: Detect body-bound tenant entity in minimal API handlers
             var endpointRouteBuilderExtensions = compilation.GetTypeByMetadataName(
                 "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions");
@@ -637,6 +651,131 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         }
     }
 
+    private static void AnalyzeDirectHeaderQueryAccess(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        AspNetCoreTypes aspNetTypes)
+    {
+        var propertyRef = (IPropertyReferenceOperation)context.Operation;
+
+        if (!propertyRef.Property.IsIndexer)
+            return;
+
+        var receiverType = propertyRef.Instance?.Type;
+        if (receiverType is null)
+            return;
+
+        string? sourceLabel;
+        bool isHeader;
+        if (aspNetTypes.HeaderDictionary is not null &&
+            DerivesFromOrImplements(receiverType, null, aspNetTypes.HeaderDictionary))
+        {
+            sourceLabel = "Request.Headers";
+            isHeader = true;
+        }
+        else if (aspNetTypes.QueryCollection is not null &&
+                 DerivesFromOrImplements(receiverType, null, aspNetTypes.QueryCollection))
+        {
+            sourceLabel = "Request.Query";
+            isHeader = false;
+        }
+        else
+        {
+            return;
+        }
+
+        if (propertyRef.Arguments.Length == 0)
+            return;
+
+        var argOp = propertyRef.Arguments[0].Value;
+        if (!argOp.ConstantValue.HasValue || argOp.ConstantValue.Value is not string key)
+            return;
+
+        var normalizedKey = isHeader ? NormalizeHeaderName(key) : key;
+        if (!options.TenantPropertyNames.Contains(normalizedKey))
+            return;
+
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL004,
+            propertyRef.Syntax.GetLocation(),
+            key,
+            sourceLabel));
+    }
+
+    private static void AnalyzeTryGetValueCall(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        AspNetCoreTypes aspNetTypes)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+
+        if (invocation.TargetMethod.Name != "TryGetValue")
+            return;
+
+        var receiverType = invocation.Instance?.Type;
+        if (receiverType is null)
+            return;
+
+        string? sourceLabel;
+        bool isHeader;
+        if (aspNetTypes.HeaderDictionary is not null &&
+            DerivesFromOrImplements(receiverType, null, aspNetTypes.HeaderDictionary))
+        {
+            sourceLabel = "Request.Headers";
+            isHeader = true;
+        }
+        else if (aspNetTypes.QueryCollection is not null &&
+                 DerivesFromOrImplements(receiverType, null, aspNetTypes.QueryCollection))
+        {
+            sourceLabel = "Request.Query";
+            isHeader = false;
+        }
+        else
+        {
+            return;
+        }
+
+        if (invocation.Arguments.Length == 0)
+            return;
+
+        var keyArg = invocation.Arguments[0].Value;
+        if (!keyArg.ConstantValue.HasValue || keyArg.ConstantValue.Value is not string key)
+            return;
+
+        var normalizedKey = isHeader ? NormalizeHeaderName(key) : key;
+        if (!options.TenantPropertyNames.Contains(normalizedKey))
+            return;
+
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL004,
+            invocation.Syntax.GetLocation(),
+            key,
+            sourceLabel));
+    }
+
+    private static string NormalizeHeaderName(string headerName)
+    {
+        // Strip X- prefix (case-insensitive)
+        if (headerName.Length > 2 &&
+            (headerName[0] == 'X' || headerName[0] == 'x') &&
+            headerName[1] == '-')
+        {
+            headerName = headerName.Substring(2);
+        }
+
+        // Strip dashes
+        if (headerName.IndexOf('-') >= 0)
+            headerName = headerName.Replace("-", "");
+
+        return headerName;
+    }
+
     private static void AnalyzeCommandTextAssignment(
         OperationAnalysisContext context,
         TenantModel model,
@@ -1068,9 +1207,14 @@ internal sealed class AspNetCoreTypes
     public INamedTypeSymbol? FromRoute { get; }
     public INamedTypeSymbol? FromQuery { get; }
     public INamedTypeSymbol? FromHeader { get; }
+    public INamedTypeSymbol? HeaderDictionary { get; }
+    public INamedTypeSymbol? QueryCollection { get; }
 
     public bool HasAny =>
         FromBody is not null || FromForm is not null || ApiController is not null;
+
+    public bool HasHeaderOrQuery =>
+        HeaderDictionary is not null || QueryCollection is not null;
 
     private AspNetCoreTypes(
         INamedTypeSymbol? fromBody,
@@ -1079,7 +1223,9 @@ internal sealed class AspNetCoreTypes
         INamedTypeSymbol? fromServices,
         INamedTypeSymbol? fromRoute,
         INamedTypeSymbol? fromQuery,
-        INamedTypeSymbol? fromHeader)
+        INamedTypeSymbol? fromHeader,
+        INamedTypeSymbol? headerDictionary,
+        INamedTypeSymbol? queryCollection)
     {
         FromBody = fromBody;
         FromForm = fromForm;
@@ -1088,6 +1234,8 @@ internal sealed class AspNetCoreTypes
         FromRoute = fromRoute;
         FromQuery = fromQuery;
         FromHeader = fromHeader;
+        HeaderDictionary = headerDictionary;
+        QueryCollection = queryCollection;
     }
 
     public static AspNetCoreTypes Resolve(Compilation compilation)
@@ -1099,6 +1247,8 @@ internal sealed class AspNetCoreTypes
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromServicesAttribute"),
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromRouteAttribute"),
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute"),
-            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute"));
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IHeaderDictionary"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IQueryCollection"));
     }
 }

@@ -10,6 +10,7 @@ public class TL004Tests
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 
 namespace Microsoft.AspNetCore.Mvc
 {
@@ -33,6 +34,26 @@ namespace Microsoft.AspNetCore.Mvc
 
     [AttributeUsage(AttributeTargets.Parameter)]
     public class FromHeaderAttribute : Attribute { }
+}
+
+namespace Microsoft.AspNetCore.Http
+{
+    public interface IHeaderDictionary
+    {
+        string this[string key] { get; set; }
+        bool TryGetValue(string key, out string value);
+    }
+
+    public interface IQueryCollection
+    {
+        string this[string key] { get; }
+    }
+
+    public class HttpRequest
+    {
+        public IHeaderDictionary Headers { get; set; }
+        public IQueryCollection Query { get; set; }
+    }
 }
 
 public class Customer
@@ -214,6 +235,123 @@ public class MyController
 ";
         // [FromBody] is not a client-input binding source for TL004
         // (body binding for entity types is handled by TL010)
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    // ===========================================================
+    // Direct header/query reads — Positive
+    // ===========================================================
+
+    [Fact]
+    public async Task Headers_Indexer_XTenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var tid = {|#0:request.Headers[""X-Tenant-Id""]|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("X-Tenant-Id", "Request.Headers");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Headers_TryGetValue_XTenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        {|#0:request.Headers.TryGetValue(""X-Tenant-Id"", out var value)|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("X-Tenant-Id", "Request.Headers");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Query_Indexer_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var tid = {|#0:request.Query[""tenantId""]|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "Request.Query");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    // ===========================================================
+    // Direct header/query reads — Negative
+    // ===========================================================
+
+    [Fact]
+    public async Task Headers_Indexer_Authorization_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var auth = request.Headers[""Authorization""];
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task Query_Indexer_Page_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var page = request.Query[""page""];
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task Headers_Indexer_CrossTenant_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
+public class CrossTenantAttribute : Attribute
+{
+    public CrossTenantAttribute(string reason = """") { }
+}
+
+public class MyController
+{
+    [CrossTenant(""Admin lookup"")]
+    public void Get(HttpRequest request)
+    {
+        var tid = request.Headers[""X-Tenant-Id""];
+    }
+}
+";
         await Verify.VerifyWithEfCoreAsync(source);
     }
 }
