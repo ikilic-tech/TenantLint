@@ -488,6 +488,358 @@ public class AppDbContext : DbContext
     }
 
     [Fact]
+    public async Task CodeFix_UsesActualParameterName_WhenDifferent()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder b)
+    {
+        base.OnModelCreating(b);
+    }
+}
+";
+
+        var fixedSource = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder b)
+    {
+        base.OnModelCreating(b);
+        b.Entity<Customer>().HasQueryFilter(e => e.TenantId == TODO_SET_TENANT_ACCESSOR);
+    }
+}
+";
+
+        var test = new CSharpCodeFixTest<TenantIsolationAnalyzer, TL005CodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = Verify.Net80WithEfCore,
+            CodeActionEquivalenceKey = "TL005_AddFilter",
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
+                | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
+        };
+        test.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithLocation(0)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        test.FixedState.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithSpan(12, 28, 12, 37)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CodeFix_GeneratesNamedFilter_WhenContextUsesNamedFilters()
+    {
+        // Order already has a named filter → code fix for Invoice should use named syntax
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class Invoice
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private string _tid = ""t1"";
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<Invoice> {|#0:Invoices|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().HasQueryFilter(""Tenant"", e => e.TenantId == _tid);
+    }
+}
+";
+
+        var fixedSource = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class Invoice
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private string _tid = ""t1"";
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<Invoice> Invoices { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().HasQueryFilter(""Tenant"", e => e.TenantId == _tid);
+        modelBuilder.Entity<Invoice>().HasQueryFilter(""Tenant"", x => x.TenantId == TODO_SET_TENANT_ACCESSOR);
+    }
+}
+";
+
+        var test = new CSharpCodeFixTest<TenantIsolationAnalyzer, TL005CodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = Verify.Net100WithEfCore10,
+            CodeActionEquivalenceKey = "TL005_AddFilter",
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
+                | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
+        };
+        test.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithLocation(0)
+                .WithArguments("Invoice", "TenantId", "AppDbContext"));
+        test.FixedState.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithSpan(20, 27, 20, 35)
+                .WithArguments("Invoice", "TenantId", "AppDbContext"));
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CodeFix_GeneratesUnnamedFilter_WhenNoNamedFilters()
+    {
+        // EF 8 context with no named filters — should use unnamed syntax (existing behavior)
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+    }
+}
+";
+
+        var fixedSource = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == TODO_SET_TENANT_ACCESSOR);
+    }
+}
+";
+
+        var test = new CSharpCodeFixTest<TenantIsolationAnalyzer, TL005CodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = Verify.Net80WithEfCore,
+            CodeActionEquivalenceKey = "TL005_AddFilter",
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
+                | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
+        };
+        test.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithLocation(0)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        test.FixedState.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithSpan(12, 28, 12, 37)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CodeFix_AvoidsLambdaCollision_WhenEIsInScope()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        var e = ""something"";
+        System.Console.WriteLine(e);
+    }
+}
+";
+
+        var fixedSource = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        var e = ""something"";
+        System.Console.WriteLine(e);
+        modelBuilder.Entity<Customer>().HasQueryFilter(x => x.TenantId == TODO_SET_TENANT_ACCESSOR);
+    }
+}
+";
+
+        var test = new CSharpCodeFixTest<TenantIsolationAnalyzer, TL005CodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = Verify.Net80WithEfCore,
+            CodeActionEquivalenceKey = "TL005_AddFilter",
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
+                | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
+        };
+        test.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithLocation(0)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        test.FixedState.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithSpan(12, 28, 12, 37)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CodeFix_UsesConfiguredFilterName_ViaEditorConfig()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+    }
+}
+";
+
+        var fixedSource = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<Customer>().HasQueryFilter(""Isolation"", e => e.TenantId == TODO_SET_TENANT_ACCESSOR);
+    }
+}
+";
+
+        var editorconfig = @"
+is_global = true
+tenantlint.tenant_filter_name = Isolation
+";
+
+        var test = new CSharpCodeFixTest<TenantIsolationAnalyzer, TL005CodeFixProvider, DefaultVerifier>
+        {
+            TestCode = source,
+            FixedCode = fixedSource,
+            ReferenceAssemblies = Verify.Net80WithEfCore,
+            CodeActionEquivalenceKey = "TL005_AddFilter",
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
+                | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
+        };
+        test.TestState.AnalyzerConfigFiles.Add(("/.editorconfig", editorconfig));
+        test.FixedState.AnalyzerConfigFiles.Add(("/.editorconfig", editorconfig));
+        test.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithLocation(0)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        test.FixedState.ExpectedDiagnostics.Add(
+            CodeFixVerify.Diagnostic(Descriptors.TL005)
+                .WithSpan(12, 28, 12, 37)
+                .WithArguments("Customer", "TenantId", "AppDbContext"));
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task CodeFix_NotOffered_WhenEntityHasIEntityTypeConfiguration()
     {
         var source = @"

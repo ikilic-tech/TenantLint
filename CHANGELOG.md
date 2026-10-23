@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- TL005 code fix: use the actual `OnModelCreating` parameter name instead of hardcoding `modelBuilder`.
+- TL005 code fix: generate named `HasQueryFilter("Tenant", ...)` when the DbContext uses EF Core 10 named filters or `tenantlint.tenant_filter_name` is configured.
+- TL005 code fix: avoid lambda parameter name collision with identifiers already in scope.
+
 ## [0.1.0-preview.2] - 2026-10-23
 
 ### Fixed

@@ -146,6 +146,17 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                             info.HasEntityTypeConfiguration.ToString());
                         propertiesBuilder.Add("DbContextTypeName", info.DbContextType.ToDisplayString());
 
+                        // Pass named filter info so code fix can generate the correct syntax
+                        var contextUsesNamedFilters = model.TenantEntities.Values
+                            .Any(e => SymbolEqualityComparer.Default.Equals(e.DbContextType, info.DbContextType)
+                                      && e.FilterNames.Length > 0);
+                        if (contextUsesNamedFilters || options.TenantFilterName is not null)
+                        {
+                            propertiesBuilder.Add("UseNamedFilter", "True");
+                            propertiesBuilder.Add("TenantFilterName",
+                                options.TenantFilterName ?? "Tenant");
+                        }
+
                         symbolContext.ReportDiagnostic(Diagnostic.Create(
                             descriptor,
                             property.Locations.FirstOrDefault() ?? Location.None,

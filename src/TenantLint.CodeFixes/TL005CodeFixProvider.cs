@@ -16,6 +16,8 @@ namespace TenantLint.CodeFixes;
 [Shared]
 public sealed class TL005CodeFixProvider : CodeFixProvider
 {
+    private static readonly string[] LambdaParamCandidates = { "e", "x", "entity", "t", "f" };
+
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("TL005");
 
@@ -105,9 +107,12 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
         if (diagnostic.Properties.TryGetValue("TenantPropertyName", out var propName) && propName is not null)
             tenantPropertyName = propName;
 
-        // Build the HasQueryFilter statement text
-        var statementText =
-            $"modelBuilder.Entity<{entityTypeName}>().HasQueryFilter(e => e.{tenantPropertyName} == TODO_SET_TENANT_ACCESSOR);";
+        // Check if named filter syntax should be used
+        var useNamedFilter = diagnostic.Properties.TryGetValue("UseNamedFilter", out var useNf) &&
+                             useNf == "True";
+        var tenantFilterName = "Tenant";
+        if (diagnostic.Properties.TryGetValue("TenantFilterName", out var tfn) && tfn is not null)
+            tenantFilterName = tfn;
 
         // Find OnModelCreating method
         var onModelCreating = classDecl.Members
@@ -118,6 +123,19 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
 
         if (onModelCreating?.Body is not null)
         {
+            // Use the actual parameter name from OnModelCreating
+            var modelBuilderParam = "modelBuilder";
+            if (onModelCreating.ParameterList.Parameters.Count > 0)
+                modelBuilderParam = onModelCreating.ParameterList.Parameters[0].Identifier.ValueText;
+
+            // Choose a lambda parameter that doesn't collide with identifiers in scope
+            var lambdaParam = PickLambdaParam(onModelCreating);
+
+            // Build the HasQueryFilter statement text
+            var statementText = BuildStatementText(
+                modelBuilderParam, entityTypeName, lambdaParam, tenantPropertyName,
+                useNamedFilter, tenantFilterName);
+
             // Determine indentation from existing statements
             var indent = "        "; // default: 8 spaces
             var existingStatements = onModelCreating.Body.Statements;
@@ -140,7 +158,12 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
         }
         else
         {
-            // Create a new OnModelCreating override
+            // Create a new OnModelCreating override — use standard "modelBuilder" and "e"
+            var lambdaParam = "e";
+            var statementText = BuildStatementText(
+                "modelBuilder", entityTypeName, lambdaParam, tenantPropertyName,
+                useNamedFilter, tenantFilterName);
+
             var methodText =
                 "protected override void OnModelCreating(ModelBuilder modelBuilder)" + eol +
                 "    {" + eol +
@@ -161,5 +184,46 @@ public sealed class TL005CodeFixProvider : CodeFixProvider
         }
 
         return document.WithSyntaxRoot(newRoot);
+    }
+
+    private static string BuildStatementText(
+        string modelBuilderParam,
+        string entityTypeName,
+        string lambdaParam,
+        string tenantPropertyName,
+        bool useNamedFilter,
+        string tenantFilterName)
+    {
+        var filterExpr = $"{lambdaParam} => {lambdaParam}.{tenantPropertyName} == TODO_SET_TENANT_ACCESSOR";
+        return useNamedFilter
+            ? $"{modelBuilderParam}.Entity<{entityTypeName}>().HasQueryFilter(\"{tenantFilterName}\", {filterExpr});"
+            : $"{modelBuilderParam}.Entity<{entityTypeName}>().HasQueryFilter({filterExpr});";
+    }
+
+    private static string PickLambdaParam(MethodDeclarationSyntax method)
+    {
+        if (method.Body is null)
+            return "e";
+
+        var usedIdentifiers = new System.Collections.Generic.HashSet<string>();
+
+        // Collect parameter names
+        foreach (var param in method.ParameterList.Parameters)
+            usedIdentifiers.Add(param.Identifier.ValueText);
+
+        // Collect all identifier tokens in the method body
+        foreach (var token in method.Body.DescendantTokens())
+        {
+            if (token.IsKind(SyntaxKind.IdentifierToken))
+                usedIdentifiers.Add(token.ValueText);
+        }
+
+        foreach (var candidate in LambdaParamCandidates)
+        {
+            if (!usedIdentifiers.Contains(candidate))
+                return candidate;
+        }
+
+        return "e0";
     }
 }
