@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
+### Fixed
+
+- **TL007**: message now says "Static property" for static properties (was "Static field" for both fields and properties).
+
 ## [0.1.0] - 2026-10-24
 
 First stable release: 27 diagnostic rules covering query filters, raw SQL (EF Core, Dapper, ADO.NET), request input binding, lifetime and state management, framework-specific patterns (Finbuckle, ABP), and anti-tamper — with 2 code fixes.
@@ -119,7 +125,8 @@ First stable release: 27 diagnostic rules covering query filters, raw SQL (EF Co
 - NuGet package [`TenantLint.Analyzers`](https://www.nuget.org/packages/TenantLint.Analyzers) — analyzer-only (`analyzers/dotnet/cs`), `DevelopmentDependency`, MIT license.
 - Supports EF Core 8+ and EF Core 10 named filters.
 
-[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.3...v0.1.0
 [0.1.0-preview.3]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.2...v0.1.0-preview.3
 [0.1.0-preview.2]: https://github.com/ikilic-tech/TenantLint/compare/v0.1.0-preview.1...v0.1.0-preview.2

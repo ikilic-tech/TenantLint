@@ -190,8 +190,8 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor TL007 = new(
         id: "TL007",
-        title: "Tenant context stored in static field",
-        messageFormat: "Static field '{0}' holds tenant state; tenant values in static fields are shared across all requests and tenants",
+        title: "Tenant context stored in static member",
+        messageFormat: "Static {0} '{1}' holds tenant state; tenant values in static fields are shared across all requests and tenants",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,

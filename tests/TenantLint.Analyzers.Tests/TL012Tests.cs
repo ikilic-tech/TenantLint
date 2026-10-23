@@ -70,7 +70,7 @@ public class AppDbContext : DbContext
 
         var expectedTL007 = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(1)
-            .WithArguments("CurrentTenantId");
+            .WithArguments("field", "CurrentTenantId");
 
         await Verify.VerifyWithEfCoreAsync(source, expectedTL012, expectedTL007);
     }
@@ -498,7 +498,7 @@ public class AppDbContext : DbContext
 
         var expectedTL007 = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(1)
-            .WithArguments("AllowedTenants");
+            .WithArguments("property", "AllowedTenants");
 
         await Verify.VerifyWithEfCoreAsync(source, expectedTL012, expectedTL007);
     }

@@ -42,7 +42,7 @@ class TenantState
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("CurrentTenantId");
+            .WithArguments("field", "CurrentTenantId");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -64,7 +64,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("_ctx");
+            .WithArguments("field", "_ctx");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -81,7 +81,7 @@ class Config
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("TenantId");
+            .WithArguments("property", "TenantId");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -232,7 +232,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Current");
+            .WithArguments("property", "Current");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -254,7 +254,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Instance");
+            .WithArguments("field", "Instance");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -276,7 +276,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Instance");
+            .WithArguments("field", "Instance");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -298,7 +298,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Provider");
+            .WithArguments("field", "Provider");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -320,7 +320,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Accessor");
+            .WithArguments("field", "Accessor");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -342,11 +342,73 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Info");
+            .WithArguments("field", "Info");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
     }
+
+    // ===========================================================
+    // Message wording: "Static field" vs "Static property"
+    // ===========================================================
+
+    [Fact]
+    public async Task StaticField_MessageSaysField()
+    {
+        var source = @"
+class State
+{
+    public static string {|#0:TenantId|};
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("field", "TenantId");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticAutoProperty_MessageSaysProperty()
+    {
+        var source = @"
+class State
+{
+    public static string {|#0:TenantId|} { get; set; }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("property", "TenantId");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticAutoProperty_ReportsOnceOnProperty()
+    {
+        // An auto-property has a compiler-generated backing field
+        // (<CurrentTenantId>k__BackingField). The field is IsImplicitlyDeclared
+        // and should be skipped — only the property itself reports.
+        var source = @"
+class TenantContext
+{
+    public static string {|#0:CurrentTenantId|} { get; set; }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("property", "CurrentTenantId");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    // ===========================================================
+    // Mutable non-readonly fields: still report regardless of type
+    // ===========================================================
 
     [Fact]
     public async Task StaticNonReadonly_TenantThemeDto_StillReports()
@@ -365,7 +427,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("Current");
+            .WithArguments("field", "Current");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);

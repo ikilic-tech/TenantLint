@@ -1706,6 +1706,11 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             if (field.IsConst)
                 return;
 
+            // Skip compiler-generated backing fields (e.g. auto-property backing fields)
+            // — the property itself will be analyzed separately
+            if (field.IsImplicitlyDeclared)
+                return;
+
             isStatic = field.IsStatic;
             isReadOnly = field.IsReadOnly;
             fieldType = field.Type;
@@ -1797,10 +1802,12 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                 return;
         }
 
+        var symbolKind = symbol is IFieldSymbol ? "field" : "property";
         var location = symbol.Locations.FirstOrDefault() ?? Location.None;
         context.ReportDiagnostic(Diagnostic.Create(
             Descriptors.TL007,
             location,
+            symbolKind,
             fieldName));
     }
 
