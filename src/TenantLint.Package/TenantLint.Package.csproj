@@ -19,6 +19,7 @@
     <PackageTags>roslyn;analyzer;multi-tenant;tenant;isolation;ef-core;security</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>https://github.com/ikilic-tech/TenantLint/blob/main/CHANGELOG.md</PackageReleaseNotes>
     <DevelopmentDependency>true</DevelopmentDependency>
   </PropertyGroup>
 
