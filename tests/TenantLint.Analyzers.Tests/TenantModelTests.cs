@@ -1065,6 +1065,120 @@ public class AppDbContext : DbContext
         Assert.Empty(model.TenantEntities);
     }
 
+    // ===== P0b: METHOD FOLLOWING =====
+
+    [Fact]
+    public async Task HelperMethod_HasQueryFilter_MarksFiltered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private string _tid = ""t1"";
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        ApplyFilters(modelBuilder);
+    }
+
+    private void ApplyFilters(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == _tid);
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal(FilterState.Filtered, model.TenantEntities.Values.First().FilterState);
+    }
+
+    [Fact]
+    public async Task HelperMethod_DynamicFilter_DetectedAsUnknown()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using System;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        ApplyDynamicFilters(modelBuilder);
+    }
+
+    private void ApplyDynamicFilters(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            modelBuilder.Entity(entityType.ClrType).HasQueryFilter(
+                BuildFilterExpression(entityType.ClrType));
+        }
+    }
+
+    private static LambdaExpression BuildFilterExpression(Type type) => throw new NotImplementedException();
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal(FilterState.Unknown, model.TenantEntities.Values.First().FilterState);
+    }
+
+    [Fact]
+    public async Task TwoLevelMethodCalls_NotFollowed()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private string _tid = ""t1"";
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        Helper1(modelBuilder);
+    }
+
+    private void Helper1(ModelBuilder modelBuilder)
+    {
+        Helper2(modelBuilder);
+    }
+
+    private void Helper2(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == _tid);
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        // Two-level calls are not followed — entity stays Unfiltered
+        Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
+    }
+
     // ===== EXTERNAL BASE HEURISTIC =====
 
     private static async Task<TenantModel> BuildModelWithExternalBaseAsync(

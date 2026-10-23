@@ -254,6 +254,90 @@ internal sealed class TenantModelBuilder
                         TryRegisterEntity(entityType, contextType);
                 }
             }
+
+            // Second pass: follow one level of method calls that receive the ModelBuilder parameter
+            var modelBuilderParam = onModelCreating.Parameters[0];
+            foreach (var invocation in invocations)
+            {
+                var symbolInfo = semanticModel.GetSymbolInfo(invocation);
+                if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
+                    continue;
+
+                // Skip EF Core methods (already handled above)
+                if (calledMethod.ContainingType?.ContainingNamespace?.ToDisplayString()
+                    .StartsWith("Microsoft.EntityFrameworkCore") == true)
+                    continue;
+
+                // Check if modelBuilder is passed as an argument
+                if (!PassesModelBuilder(invocation, modelBuilderParam, semanticModel))
+                    continue;
+
+                // Method must be in source (same compilation)
+                if (calledMethod.DeclaringSyntaxReferences.Length == 0)
+                    continue;
+
+                AnalyzeHelperMethod(calledMethod, semanticModel, contextType);
+            }
+        }
+    }
+
+    private static bool PassesModelBuilder(
+        InvocationExpressionSyntax invocation,
+        IParameterSymbol modelBuilderParam,
+        SemanticModel semanticModel)
+    {
+        foreach (var arg in invocation.ArgumentList.Arguments)
+        {
+            var argSymbol = semanticModel.GetSymbolInfo(arg.Expression).Symbol;
+            if (argSymbol is IParameterSymbol param &&
+                param.Equals(modelBuilderParam, SymbolEqualityComparer.Default))
+                return true;
+        }
+        return false;
+    }
+
+    private void AnalyzeHelperMethod(
+        IMethodSymbol method,
+        SemanticModel callerSemanticModel,
+        INamedTypeSymbol contextType)
+    {
+        foreach (var syntaxRef in method.DeclaringSyntaxReferences)
+        {
+            var syntax = syntaxRef.GetSyntax();
+            if (syntax is not MethodDeclarationSyntax helperSyntax)
+                continue;
+
+            var helperSemanticModel = _compilation.GetSemanticModel(helperSyntax.SyntaxTree);
+
+            // Check for dynamic filter pattern in the helper
+            if (DetectDynamicFilters(helperSyntax, helperSemanticModel))
+                _dynamicFilterContexts.Add(contextType);
+
+            var invocations = helperSyntax.DescendantNodes().OfType<InvocationExpressionSyntax>();
+            foreach (var invocation in invocations)
+            {
+                var symbolInfo = helperSemanticModel.GetSymbolInfo(invocation);
+                if (symbolInfo.Symbol is not IMethodSymbol methodSymbol)
+                    continue;
+
+                var reducedFrom = methodSymbol.ReducedFrom ?? methodSymbol;
+                var methodName = reducedFrom.Name;
+
+                if (methodName == "HasQueryFilter")
+                {
+                    AnalyzeHasQueryFilterCall(invocation, methodSymbol, helperSemanticModel, contextType);
+                }
+                else if (methodName == "ToTable")
+                {
+                    AnalyzeToTableCall(invocation, methodSymbol, helperSemanticModel);
+                }
+                else if (methodName == "Entity" && reducedFrom.TypeArguments.Length == 1)
+                {
+                    var entityType = reducedFrom.TypeArguments[0] as INamedTypeSymbol;
+                    if (entityType is not null)
+                        TryRegisterEntity(entityType, contextType);
+                }
+            }
         }
     }
 
