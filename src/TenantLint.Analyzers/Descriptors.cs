@@ -70,6 +70,15 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL003.md");
 
+    public static readonly DiagnosticDescriptor TL004 = new(
+        id: "TL004",
+        title: "Tenant identity received from client input",
+        messageFormat: "Parameter '{0}' receives the tenant identity from client input ({1}). Derive the tenant from a trusted source (JWT claim, authenticated session) instead, or mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL004.md");
+
     public static readonly DiagnosticDescriptor TL005 = new(
         id: "TL005",
         title: "Tenant-scoped entity has no query filter",

@@ -1,0 +1,219 @@
+using Xunit;
+
+namespace TenantLint.Analyzers.Tests;
+
+using Verify = CSharpAnalyzerVerifier<TenantIsolationAnalyzer>;
+
+public class TL004Tests
+{
+    private const string SharedPreamble = @"
+using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Microsoft.AspNetCore.Mvc
+{
+    [AttributeUsage(AttributeTargets.Class)]
+    public class ApiControllerAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromBodyAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromFormAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromServicesAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromRouteAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromQueryAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public class FromHeaderAttribute : Attribute { }
+}
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private string _tid = ""t1"";
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == _tid);
+    }
+}
+";
+
+    // ===========================================================
+    // Positive — TL004 (Warning)
+    // ===========================================================
+
+    [Fact]
+    public async Task FromHeader_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromHeader] string {|#0:tenantId|})
+    {
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "FromHeader");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task FromQuery_TenantId_CaseInsensitive_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromQuery] string {|#0:TenantId|})
+    {
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("TenantId", "FromQuery");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task FromRoute_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromRoute] string {|#0:tenantId|})
+    {
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "FromRoute");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task CustomPropertyName_FromQuery_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromQuery] string {|#0:organizationId|})
+    {
+    }
+}
+";
+        var editorconfig = @"
+is_global = true
+tenantlint.tenant_property_names = TenantId, OrganizationId
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("organizationId", "FromQuery");
+
+        await Verify.VerifyWithEfCoreAndOptionsAsync(source, editorconfig, expected);
+    }
+
+    // ===========================================================
+    // Negative — no diagnostic
+    // ===========================================================
+
+    [Fact]
+    public async Task FromHeader_NonTenantName_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromHeader] string authToken)
+    {
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task FromServices_TenantId_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromServices] string tenantId)
+    {
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task NoBindingAttribute_TenantId_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(string tenantId)
+    {
+    }
+}
+";
+        // No binding attribute → not client input
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task CrossTenant_TenantId_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
+public class CrossTenantAttribute : Attribute
+{
+    public CrossTenantAttribute(string reason = """") { }
+}
+
+public class MyController
+{
+    [CrossTenant(""Admin lookup by tenant"")]
+    public void Get([FromHeader] string tenantId)
+    {
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task FromBody_TenantId_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get([FromBody] string tenantId)
+    {
+    }
+}
+";
+        // [FromBody] is not a client-input binding source for TL004
+        // (body binding for entity types is handled by TL010)
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+}
