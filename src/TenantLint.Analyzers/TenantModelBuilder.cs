@@ -38,6 +38,9 @@ internal sealed class TenantModelBuilder
     private readonly HashSet<INamedTypeSymbol> _externalBaseContexts =
         new(SymbolEqualityComparer.Default);
 
+    // Discovered DbContext types (stored for fallback context resolution)
+    private ImmutableArray<INamedTypeSymbol> _contextTypes;
+
     public TenantModelBuilder(Compilation compilation, ConfigOptions options)
     {
         _compilation = compilation;
@@ -54,10 +57,11 @@ internal sealed class TenantModelBuilder
         if (_dbContextType is null)
             return TenantModel.Empty;
 
-        var contextTypes = FindDbContextTypes();
-        if (contextTypes.Length == 0)
+        _contextTypes = FindDbContextTypes();
+        if (_contextTypes.Length == 0)
             return TenantModel.Empty;
 
+        var contextTypes = _contextTypes;
         foreach (var contextType in contextTypes)
         {
             DiscoverDbSetEntities(contextType);
@@ -65,6 +69,9 @@ internal sealed class TenantModelBuilder
         }
 
         AnalyzeEntityTypeConfigurations();
+
+        // Discover entities from Set<T>() calls across the compilation (P0a)
+        DiscoverEntitiesFromSetCalls(contextTypes);
 
         // Propagate explicit filters from base types to derived types (F3).
         // EF Core only allows HasQueryFilter on root entities; the filter applies to all derived types.
@@ -240,8 +247,71 @@ internal sealed class TenantModelBuilder
                 {
                     AnalyzeToTableCall(invocation, methodSymbol, semanticModel);
                 }
+                else if (methodName == "Entity" && reducedFrom.TypeArguments.Length == 1)
+                {
+                    var entityType = reducedFrom.TypeArguments[0] as INamedTypeSymbol;
+                    if (entityType is not null)
+                        TryRegisterEntity(entityType, contextType);
+                }
             }
         }
+    }
+
+    private void DiscoverEntitiesFromSetCalls(ImmutableArray<INamedTypeSymbol> contextTypes)
+    {
+        foreach (var tree in _compilation.SyntaxTrees)
+        {
+            var semanticModel = _compilation.GetSemanticModel(tree);
+            foreach (var invocation in tree.GetRoot().DescendantNodes()
+                         .OfType<InvocationExpressionSyntax>())
+            {
+                // Quick syntactic filter: must be xxx.Set<T>()
+                if (invocation.Expression is not MemberAccessExpressionSyntax ma ||
+                    ma.Name is not GenericNameSyntax { Identifier.ValueText: "Set" } gn ||
+                    gn.TypeArgumentList.Arguments.Count != 1)
+                    continue;
+
+                var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+                if (symbol?.ContainingType is null)
+                    continue;
+
+                // Must be on DbContext or derived type
+                if (!symbol.ContainingType.Equals(_dbContextType, SymbolEqualityComparer.Default) &&
+                    !DerivesFrom(symbol.ContainingType, _dbContextType!))
+                    continue;
+
+                var entityType = symbol.TypeArguments[0] as INamedTypeSymbol;
+                if (entityType is null)
+                    continue;
+
+                var contextType = FindContextTypeForSetCall(symbol.ContainingType, contextTypes);
+                TryRegisterEntity(entityType, contextType);
+            }
+        }
+    }
+
+    private INamedTypeSymbol? FindContextTypeForSetCall(
+        INamedTypeSymbol receiverType,
+        ImmutableArray<INamedTypeSymbol> contextTypes)
+    {
+        // The receiver of Set<T>() is a DbContext or derived type.
+        // Find the concrete DbContext subclass from our discovered contexts.
+        foreach (var ctx in contextTypes)
+        {
+            if (ctx.Equals(receiverType, SymbolEqualityComparer.Default) ||
+                DerivesFrom(ctx, receiverType))
+                return ctx;
+        }
+
+        // If the receiver itself is a discovered context
+        foreach (var ctx in contextTypes)
+        {
+            if (receiverType.Equals(ctx, SymbolEqualityComparer.Default))
+                return ctx;
+        }
+
+        // Fallback: return the first context (single-context projects)
+        return contextTypes.Length == 1 ? contextTypes[0] : null;
     }
 
     private void AnalyzeEntityTypeConfigurations()
@@ -254,6 +324,9 @@ internal sealed class TenantModelBuilder
 
         foreach (var (configType, entityType) in configTypes)
         {
+            // Register the entity if not already known (P0a: IEntityTypeConfiguration discovery)
+            TryRegisterEntity(entityType, FindContextForEntity(entityType));
+
             // Mark that this entity has an IEntityTypeConfiguration
             if (_entities.TryGetValue(entityType, out var entityInfo))
                 entityInfo.HasEntityTypeConfiguration = true;
@@ -964,6 +1037,54 @@ internal sealed class TenantModelBuilder
         return null;
     }
 
+    private string? FindTenantPropertyViaMarkerInterface(INamedTypeSymbol type)
+    {
+        if (_options.TenantMarkerInterfaces.Count == 0)
+            return null;
+
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (!_options.TenantMarkerInterfaces.Contains(iface.Name))
+                continue;
+
+            // Check if the interface defines a tenant property
+            foreach (var member in iface.GetMembers())
+            {
+                if (member is IPropertySymbol property &&
+                    _options.TenantPropertyNames.Contains(property.Name))
+                {
+                    return property.Name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void TryRegisterEntity(INamedTypeSymbol entityType, INamedTypeSymbol? contextType)
+    {
+        if (IsGlobalEntity(entityType))
+            return;
+        if (_entities.ContainsKey(entityType))
+            return;
+        if (contextType is null)
+            return;
+
+        var tenantProp = FindTenantProperty(entityType);
+        if (tenantProp is null)
+            tenantProp = FindTenantPropertyViaMarkerInterface(entityType);
+        if (tenantProp is null)
+            return;
+
+        _entities[entityType] = new MutableEntityInfo
+        {
+            EntityType = entityType,
+            TenantPropertyName = tenantProp,
+            HasExplicitFilter = false,
+            DbContextType = contextType,
+        };
+    }
+
     private bool IsGlobalEntity(INamedTypeSymbol type) =>
         _options.GlobalEntities.Contains(type.Name);
 
@@ -976,7 +1097,8 @@ internal sealed class TenantModelBuilder
         if (_entities.TryGetValue(entityType, out var existing))
             return existing.DbContextType;
 
-        return null;
+        // Fallback: if there's only one context, use it
+        return _contextTypes.Length == 1 ? _contextTypes[0] : null;
     }
 
     private void PropagateInheritedFilters()

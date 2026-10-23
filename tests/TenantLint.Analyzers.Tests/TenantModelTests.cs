@@ -897,6 +897,174 @@ public class AppDbContext : DbContext
             model.TenantEntities.Keys.First()));
     }
 
+    // ===== P0a: EXTENDED ENTITY DISCOVERY =====
+
+    [Fact]
+    public async Task EntityFromModelBuilderEntity_NoDbSet_Discovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>();
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal("TenantId", model.TenantEntities.Values.First().TenantPropertyName);
+    }
+
+    [Fact]
+    public async Task EntityFromSet_InRepository_NoDbSet_Discovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+}
+
+public class CustomerRepository
+{
+    private readonly AppDbContext _db;
+    public CustomerRepository(AppDbContext db) => _db = db;
+
+    public Customer? GetById(int id) => _db.Set<Customer>().Find(id);
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal("TenantId", model.TenantEntities.Values.First().TenantPropertyName);
+    }
+
+    [Fact]
+    public async Task EntityFromIEntityTypeConfiguration_NoDbSet_Discovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.ApplyConfiguration(new CustomerConfig());
+    }
+}
+
+public class CustomerConfig : IEntityTypeConfiguration<Customer>
+{
+    public void Configure(EntityTypeBuilder<Customer> builder)
+    {
+        builder.HasKey(c => c.Id);
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+    }
+
+    [Fact]
+    public async Task EntityFromMarkerInterface_Discovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public interface ITenantEntity
+{
+    string TenantId { get; set; }
+}
+
+public class Customer : ITenantEntity
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+}
+";
+        var options = ConfigOptions.CreateWithTenantMarkerInterfaces("ITenantEntity");
+        var model = await BuildModelAsync(source, options);
+        Assert.Single(model.TenantEntities);
+    }
+
+    [Fact]
+    public async Task EntityFromEntity_NonTenantEntity_NotDiscovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Country
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Country>();
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Empty(model.TenantEntities);
+    }
+
+    [Fact]
+    public async Task SetOnNonDbContextType_NotDiscovered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class NotADbContext
+{
+    public void DoSomething()
+    {
+        // This looks like Set<T>() but isn't on a DbContext
+    }
+}
+
+public class AppDbContext : DbContext
+{
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Empty(model.TenantEntities);
+    }
+
     // ===== EXTERNAL BASE HEURISTIC =====
 
     private static async Task<TenantModel> BuildModelWithExternalBaseAsync(
