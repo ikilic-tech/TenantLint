@@ -39,6 +39,9 @@ No configuration required. Works with plain EF Core `HasQueryFilter`,
 Finbuckle, ABP, or any hand-rolled multi-tenant setup. No base classes,
 no interfaces, no runtime dependency.
 
+> After updating, if your IDE still shows old diagnostics, reload the
+> project or restart the IDE.
+
 ## Quick example
 
 Build output when TL001 fires:
