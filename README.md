@@ -20,6 +20,20 @@ dotnet add package TenantLint.Analyzers
 
 No configuration required. Works with plain EF Core `HasQueryFilter`, Finbuckle, ABP, or any hand-rolled multi-tenant setup. No base classes, no interfaces, no runtime dependency.
 
+## Supported versions
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| .NET SDK  | 8.0     | 10.0        |
+| EF Core   | 8.0     | 10.0 (named filters) |
+| C#        | 12      | latest      |
+
+EF6 and .NET Framework projects are not supported.
+
+## Demo
+
+![TenantLint in action](docs/assets/demo.gif)
+
 ## Rules
 
 | ID | Severity | What it detects | Code fix | Docs |
@@ -28,6 +42,8 @@ No configuration required. Works with plain EF Core `HasQueryFilter`, Finbuckle,
 | [TL002](docs/rules/TL002.md) | Warning | EF Core raw SQL (`ExecuteSqlRaw`, `SqlQuery`, etc.) references tenant table without tenant WHERE clause | -- | [TL002](docs/rules/TL002.md) |
 | [TL003](docs/rules/TL003.md) | Warning | Dapper `SqlMapper` call references tenant table without tenant WHERE clause | -- | [TL003](docs/rules/TL003.md) |
 | [TL005](docs/rules/TL005.md) | Warning | Tenant-scoped entity exposed as `DbSet<T>` has no `HasQueryFilter` | Inserts `HasQueryFilter` stub into `OnModelCreating` | [TL005](docs/rules/TL005.md) |
+
+> **Caution — Fix All:** "Fix All in Project/Solution" changes runtime behavior. Mark intentional cross-tenant methods with `[CrossTenant("reason")]` first, then apply the fix to the rest.
 
 ### Info-level variants
 
