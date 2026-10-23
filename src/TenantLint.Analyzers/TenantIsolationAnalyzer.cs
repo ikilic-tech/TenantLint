@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
@@ -34,12 +36,23 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL104,
             Descriptors.TL005,
             Descriptors.TL105,
+            Descriptors.TL006,
+            Descriptors.TL007,
+            Descriptors.TL007Captive,
+            Descriptors.TL008,
+            Descriptors.TL009,
             Descriptors.TL010,
             Descriptors.TL011,
             Descriptors.TL111,
             Descriptors.TL012,
             Descriptors.TL013,
             Descriptors.TL113,
+            Descriptors.TL014,
+            Descriptors.TL014Change,
+            Descriptors.TL015,
+            Descriptors.TL201,
+            Descriptors.TL202,
+            Descriptors.TL203,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -55,6 +68,52 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             var options = ConfigOptions.Create(
                 compilationStartContext.Options.AnalyzerConfigOptionsProvider,
                 compilation);
+
+            // TL201: #pragma warning disable TLxxx without justification (EF-agnostic)
+            compilationStartContext.RegisterSyntaxTreeAction(
+                treeContext => AnalyzePragmaDirectives(treeContext));
+
+            // TL202: [SuppressMessage] targeting TL rules without justification (EF-agnostic)
+            compilationStartContext.RegisterSymbolAction(
+                symbolContext => AnalyzeSuppressMessageAttribute(symbolContext),
+                SymbolKind.Method, SymbolKind.NamedType);
+
+            // TL203: TL rules globally disabled via NoWarn or .editorconfig (EF-agnostic)
+            compilationStartContext.RegisterCompilationEndAction(endContext =>
+                AnalyzeGlobalSuppressions(
+                    endContext,
+                    compilationStartContext.Options.AnalyzerConfigOptionsProvider));
+
+            // TL007: Static field/property with tenant state (EF-agnostic)
+            compilationStartContext.RegisterSymbolAction(
+                symbolContext => AnalyzeStaticTenantField(symbolContext, options),
+                SymbolKind.Field, SymbolKind.Property);
+
+            // TL014: ABP tenant-filter bypass (EF-agnostic — ABP has its own filter system)
+            var abpDataFilter = compilation.GetTypeByMetadataName("Volo.Abp.Data.IDataFilter");
+            var abpCurrentTenant = compilation.GetTypeByMetadataName("Volo.Abp.MultiTenancy.ICurrentTenant");
+            var abpIMultiTenant = compilation.GetTypeByMetadataName("Volo.Abp.MultiTenancy.IMultiTenant");
+
+            if (abpDataFilter is not null || abpCurrentTenant is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeAbpBypass(
+                        operationContext, options,
+                        abpDataFilter, abpCurrentTenant, abpIMultiTenant),
+                    OperationKind.Invocation);
+            }
+
+            // TL015: Finbuckle TenantMismatchMode.Ignore (EF-agnostic — Finbuckle has its own mode)
+            var tenantMismatchModeType = compilation.GetTypeByMetadataName(
+                "Finbuckle.MultiTenant.EntityFrameworkCore.TenantMismatchMode");
+
+            if (tenantMismatchModeType is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeFinbuckleMismatchMode(
+                        operationContext, options, tenantMismatchModeType),
+                    OperationKind.SimpleAssignment);
+            }
 
             var builder = new TenantModelBuilder(compilation, options);
             var model = builder.Build();
@@ -266,6 +325,58 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                             contextType.Name));
                     }
                 });
+            }
+
+            // TL009: RLS session variable leak (SET without LOCAL, set_config with false)
+            if (relationalDbFacadeExtensions is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeRlsSessionVariable(
+                        operationContext, options, relationalDbFacadeExtensions),
+                    OperationKind.Invocation);
+            }
+
+            // TL009: Also check ADO.NET CommandText for RLS patterns
+            if (dbCommandType is not null || iDbCommandType is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeRlsCommandText(
+                        operationContext, options, dbCommandType, iDbCommandType),
+                    OperationKind.SimpleAssignment);
+            }
+
+            // TL006: Cache key without tenant context
+            var memoryCacheType = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Caching.Memory.IMemoryCache");
+            var distributedCacheType = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Caching.Distributed.IDistributedCache");
+            var hybridCacheType = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Caching.Hybrid.HybridCache");
+
+            if (memoryCacheType is not null || distributedCacheType is not null ||
+                hybridCacheType is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeCacheKeyInvocation(
+                        operationContext, model, options,
+                        memoryCacheType, distributedCacheType, hybridCacheType),
+                    OperationKind.Invocation);
+            }
+
+            // TL008: Background service without tenant scope
+            var backgroundServiceType = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Hosting.BackgroundService");
+            var hostedServiceType = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.Hosting.IHostedService");
+
+            if ((backgroundServiceType is not null || hostedServiceType is not null) &&
+                model.TenantEntities.Count > 0)
+            {
+                compilationStartContext.RegisterSymbolAction(
+                    symbolContext => AnalyzeBackgroundService(
+                        symbolContext, model, options,
+                        backgroundServiceType, hostedServiceType),
+                    SymbolKind.NamedType);
             }
         });
     }
@@ -1208,6 +1319,854 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+
+    // ---------------------------------------------------------------
+    // TL201: #pragma warning disable TLxxx without justification
+    // ---------------------------------------------------------------
+
+    private static void AnalyzePragmaDirectives(SyntaxTreeAnalysisContext context)
+    {
+        var root = context.Tree.GetRoot(context.CancellationToken);
+
+        foreach (var directive in root.DescendantTrivia()
+                     .Where(t => t.IsKind(SyntaxKind.PragmaWarningDirectiveTrivia))
+                     .Select(t => t.GetStructure())
+                     .OfType<PragmaWarningDirectiveTriviaSyntax>())
+        {
+            if (!directive.DisableOrRestoreKeyword.IsKind(SyntaxKind.DisableKeyword))
+                continue;
+
+            foreach (var errorCode in directive.ErrorCodes)
+            {
+                var codeText = errorCode.ToString().Trim();
+                if (!codeText.StartsWith("TL", StringComparison.Ordinal))
+                    continue;
+
+                // Don't flag suppression of TL201 itself (self-referential)
+                if (codeText == "TL201")
+                    continue;
+
+                // Check for justification comment on the same line or previous line
+                if (HasJustificationComment(directive, context.Tree))
+                    continue;
+
+                context.ReportDiagnostic(Diagnostic.Create(
+                    Descriptors.TL201,
+                    directive.GetLocation(),
+                    codeText));
+                break; // One report per pragma line is enough
+            }
+        }
+    }
+
+    private static bool HasJustificationComment(PragmaWarningDirectiveTriviaSyntax directive, SyntaxTree tree)
+    {
+        var directiveSpan = directive.SyntaxTree.GetLineSpan(directive.Span);
+        var directiveLine = directiveSpan.StartLinePosition.Line;
+        var text = tree.GetText();
+
+        // Check same line for trailing comment
+        if (directiveLine < text.Lines.Count)
+        {
+            var line = text.Lines[directiveLine];
+            var lineText = line.ToString();
+            var commentIndex = lineText.IndexOf("//", StringComparison.Ordinal);
+            if (commentIndex >= 0)
+            {
+                var comment = lineText.Substring(commentIndex + 2).Trim();
+                if (!IsPlaceholderComment(comment))
+                    return true;
+            }
+        }
+
+        // Check previous line for comment
+        if (directiveLine > 0)
+        {
+            var prevLine = text.Lines[directiveLine - 1];
+            var prevText = prevLine.ToString().Trim();
+            if (prevText.StartsWith("//", StringComparison.Ordinal))
+            {
+                var comment = prevText.Substring(2).Trim();
+                if (!IsPlaceholderComment(comment))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsPlaceholderComment(string comment)
+    {
+        if (string.IsNullOrWhiteSpace(comment))
+            return true;
+
+        return PlaceholderReasons.Contains(comment) ||
+               comment.Equals("temp", StringComparison.OrdinalIgnoreCase) ||
+               comment.Equals("temporary", StringComparison.OrdinalIgnoreCase) ||
+               comment.Equals("fixme", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------------------------------------------------------
+    // TL202: [SuppressMessage] targeting TL rules without justification
+    // ---------------------------------------------------------------
+
+    private static void AnalyzeSuppressMessageAttribute(SymbolAnalysisContext context)
+    {
+        var symbol = context.Symbol;
+
+        // Skip assembly-level attributes
+        if (symbol is IAssemblySymbol)
+            return;
+
+        foreach (var attr in symbol.GetAttributes())
+        {
+            if (attr.AttributeClass is null)
+                continue;
+
+            if (attr.AttributeClass.Name != "SuppressMessageAttribute" &&
+                attr.AttributeClass.Name != "SuppressMessage")
+                continue;
+
+            if (attr.AttributeClass.ContainingNamespace?.ToDisplayString() !=
+                "System.Diagnostics.CodeAnalysis")
+                continue;
+
+            // Check if targeting TL rules
+            if (attr.ConstructorArguments.Length < 2)
+                continue;
+
+            var category = attr.ConstructorArguments[0].Value as string ?? "";
+            var checkId = attr.ConstructorArguments[1].Value as string ?? "";
+
+            if (!category.Equals("TenantIsolation", StringComparison.OrdinalIgnoreCase) &&
+                !checkId.StartsWith("TL", StringComparison.Ordinal))
+                continue;
+
+            // Check Justification named argument
+            string? justification = null;
+            foreach (var namedArg in attr.NamedArguments)
+            {
+                if (namedArg.Key == "Justification")
+                {
+                    justification = namedArg.Value.Value as string;
+                    break;
+                }
+            }
+
+            if (justification is null || IsPlaceholderComment(justification))
+            {
+                var location = attr.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                               ?? symbol.Locations.FirstOrDefault()
+                               ?? Location.None;
+
+                context.ReportDiagnostic(Diagnostic.Create(
+                    Descriptors.TL202,
+                    location,
+                    checkId));
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // TL203: TL rules globally disabled via NoWarn or .editorconfig
+    // ---------------------------------------------------------------
+
+    private static void AnalyzeGlobalSuppressions(
+        CompilationAnalysisContext context,
+        AnalyzerConfigOptionsProvider optionsProvider)
+    {
+        var suppressedIds = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Check NoWarn in compilation options
+        foreach (var kvp in context.Compilation.Options.SpecificDiagnosticOptions)
+        {
+            if (kvp.Key.StartsWith("TL", StringComparison.Ordinal) &&
+                kvp.Value == ReportDiagnostic.Suppress &&
+                !TL203IgnoredIds.Contains(kvp.Key))
+            {
+                suppressedIds.Add(kvp.Key);
+            }
+        }
+
+        // Check .editorconfig severity overrides per syntax tree
+        foreach (var tree in context.Compilation.SyntaxTrees)
+        {
+            var treeOptions = optionsProvider.GetOptions(tree);
+
+            // Check TL rule IDs: TL000-TL999 and TL200 range
+            foreach (var id in KnownTlRuleIds)
+            {
+                if (!TL203IgnoredIds.Contains(id) &&
+                    treeOptions.TryGetValue($"dotnet_diagnostic.{id}.severity", out var severity) &&
+                    string.Equals(severity, "none", StringComparison.OrdinalIgnoreCase))
+                {
+                    suppressedIds.Add(id);
+                }
+            }
+
+            break; // Only need to check one tree (project-wide editorconfig)
+        }
+
+        if (suppressedIds.Count == 0)
+            return;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL203,
+            Location.None,
+            string.Join(", ", suppressedIds)));
+    }
+
+    private static readonly ImmutableArray<string> KnownTlRuleIds = ImmutableArray.Create(
+        "TL001", "TL002", "TL003", "TL004", "TL005", "TL006", "TL007", "TL008", "TL009",
+        "TL010", "TL011", "TL012", "TL013", "TL014", "TL015",
+        "TL102", "TL103", "TL104", "TL105", "TL113",
+        "TL201", "TL202",
+        "TL900", "TL901", "TL902");
+
+    // Rules that are isEnabledByDefault: false — suppressing these is not a concern
+    // because they are off by default. TL203 should not flag them.
+    // Rules that are isEnabledByDefault: false or are meta-rules (TL201–TL203)
+    // that should not trigger TL203 when suppressed in SpecificDiagnosticOptions.
+    // IDs that TL203 should not flag when suppressed: disabled-by-default rules
+    // and anti-tamper meta-rules (TL201–TL203) to avoid self-referential loops.
+    private static readonly ImmutableHashSet<string> TL203IgnoredIds =
+        ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
+            "TL000", "TL111", "TL201", "TL202", "TL203");
+
+    // ---------------------------------------------------------------
+    // TL014: ABP tenant-filter bypass
+    // ---------------------------------------------------------------
+
+    private static void AnalyzeAbpBypass(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        INamedTypeSymbol? abpDataFilter,
+        INamedTypeSymbol? abpCurrentTenant,
+        INamedTypeSymbol? abpIMultiTenant)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Check IDataFilter.Disable<IMultiTenant>()
+        if (abpDataFilter is not null && abpIMultiTenant is not null &&
+            targetMethod.Name == "Disable")
+        {
+            var containingType = targetMethod.ContainingType;
+            if (containingType is null)
+                goto checkCurrentTenant;
+
+            // IDataFilter.Disable<T>() — check T is IMultiTenant
+            if (containingType.Equals(abpDataFilter, SymbolEqualityComparer.Default) &&
+                targetMethod.TypeArguments.Length == 1 &&
+                targetMethod.TypeArguments[0].Equals(abpIMultiTenant, SymbolEqualityComparer.Default))
+            {
+                ReportAbpBypass(context, invocation, "IDataFilter.Disable<IMultiTenant>");
+                return;
+            }
+
+            // IDataFilter<IMultiTenant>.Disable()
+            if (containingType.IsGenericType &&
+                containingType.OriginalDefinition.ToDisplayString() == "Volo.Abp.Data.IDataFilter<TFilter>" &&
+                containingType.TypeArguments.Length == 1 &&
+                containingType.TypeArguments[0].Equals(abpIMultiTenant, SymbolEqualityComparer.Default))
+            {
+                ReportAbpBypass(context, invocation, "IDataFilter<IMultiTenant>.Disable");
+                return;
+            }
+        }
+
+        checkCurrentTenant:
+        // Check ICurrentTenant.Change()
+        if (abpCurrentTenant is not null && targetMethod.Name == "Change")
+        {
+            var containingType = targetMethod.ContainingType;
+            if (containingType is not null &&
+                containingType.Equals(abpCurrentTenant, SymbolEqualityComparer.Default))
+            {
+                var location = invocation.Syntax is InvocationExpressionSyntax invocationSyntax
+                    && invocationSyntax.Expression is MemberAccessExpressionSyntax memberAccess
+                        ? memberAccess.Name.GetLocation()
+                        : invocation.Syntax.GetLocation();
+
+                context.ReportDiagnostic(Diagnostic.Create(
+                    Descriptors.TL014Change,
+                    location));
+                return;
+            }
+        }
+    }
+
+    private static void ReportAbpBypass(
+        OperationAnalysisContext context,
+        IInvocationOperation invocation,
+        string methodDescription)
+    {
+        var location = invocation.Syntax is InvocationExpressionSyntax invocationSyntax
+            && invocationSyntax.Expression is MemberAccessExpressionSyntax memberAccess
+                ? memberAccess.Name.GetLocation()
+                : invocation.Syntax.GetLocation();
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL014,
+            location,
+            methodDescription));
+    }
+
+    // ---------------------------------------------------------------
+    // TL015: Finbuckle TenantMismatchMode.Ignore
+    // ---------------------------------------------------------------
+
+    private static void AnalyzeFinbuckleMismatchMode(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        INamedTypeSymbol tenantMismatchModeType)
+    {
+        var assignment = (ISimpleAssignmentOperation)context.Operation;
+
+        // Check if RHS is TenantMismatchMode.Ignore
+        var value = assignment.Value;
+        while (value is IConversionOperation conv)
+            value = conv.Operand;
+
+        if (!value.ConstantValue.HasValue)
+            return;
+
+        if (value is not IFieldReferenceOperation fieldRef)
+            return;
+
+        if (!fieldRef.Field.ContainingType.Equals(tenantMismatchModeType, SymbolEqualityComparer.Default))
+            return;
+
+        if (fieldRef.Field.Name != "Ignore")
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL015,
+            assignment.Syntax.GetLocation()));
+    }
+
+    // ---------------------------------------------------------------
+    // TL007: Static field/property with tenant state
+    // ---------------------------------------------------------------
+
+    private static readonly ImmutableHashSet<string> AsyncLocalBackedTypes =
+        ImmutableHashSet.Create(StringComparer.Ordinal,
+            "AsyncLocal",
+            "IMultiTenantContextAccessor",
+            "IHttpContextAccessor");
+
+    private static void AnalyzeStaticTenantField(SymbolAnalysisContext context, ConfigOptions options)
+    {
+        var symbol = context.Symbol;
+        bool isStatic;
+        ITypeSymbol? fieldType;
+        string fieldName;
+
+        if (symbol is IFieldSymbol field)
+        {
+            // Enum fields are inherently static but are not tenant state
+            if (field.ContainingType?.TypeKind == TypeKind.Enum)
+                return;
+
+            // Constants are not mutable tenant state
+            if (field.IsConst)
+                return;
+
+            isStatic = field.IsStatic;
+            fieldType = field.Type;
+            fieldName = field.Name;
+        }
+        else if (symbol is IPropertySymbol property)
+        {
+            isStatic = property.IsStatic;
+            fieldType = property.Type;
+            fieldName = property.Name;
+        }
+        else
+        {
+            return;
+        }
+
+        if (!isStatic)
+            return;
+
+        // Check if the type is AsyncLocal-backed (safe)
+        var typeName = fieldType.Name;
+        if (AsyncLocalBackedTypes.Contains(typeName))
+            return;
+
+        // Check the full type name for Finbuckle accessor
+        var fullTypeName = fieldType.ToDisplayString();
+        if (fullTypeName.StartsWith("Finbuckle.MultiTenant.IMultiTenantContextAccessor", StringComparison.Ordinal) ||
+            fullTypeName.StartsWith("Microsoft.AspNetCore.Http.IHttpContextAccessor", StringComparison.Ordinal))
+            return;
+
+        // Check if the type name or field name relates to tenant
+        var isTenantRelated = false;
+
+        if (typeName.IndexOf("Tenant", StringComparison.OrdinalIgnoreCase) >= 0)
+            isTenantRelated = true;
+
+        if (!isTenantRelated && fieldName.IndexOf("Tenant", StringComparison.OrdinalIgnoreCase) >= 0)
+            isTenantRelated = true;
+
+        if (!isTenantRelated)
+        {
+            foreach (var propName in options.TenantPropertyNames)
+            {
+                if (fieldName.Equals(propName, StringComparison.OrdinalIgnoreCase) ||
+                    typeName.IndexOf(propName, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    isTenantRelated = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isTenantRelated)
+            return;
+
+        var location = symbol.Locations.FirstOrDefault() ?? Location.None;
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL007,
+            location,
+            fieldName));
+    }
+
+    // ---------------------------------------------------------------
+    // TL006: Cache key without tenant context
+    // ---------------------------------------------------------------
+
+    private static readonly ImmutableHashSet<string> MemoryCacheMethods =
+        ImmutableHashSet.Create(StringComparer.Ordinal,
+            "Get", "Set", "TryGetValue", "GetOrCreate", "GetOrCreateAsync");
+
+    private static readonly ImmutableHashSet<string> DistributedCacheMethods =
+        ImmutableHashSet.Create(StringComparer.Ordinal,
+            "Get", "GetAsync", "Set", "SetAsync",
+            "GetString", "GetStringAsync", "SetString", "SetStringAsync");
+
+    private static readonly ImmutableHashSet<string> HybridCacheMethods =
+        ImmutableHashSet.Create(StringComparer.Ordinal,
+            "GetOrCreateAsync", "SetAsync", "RemoveAsync");
+
+    private static void AnalyzeCacheKeyInvocation(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol? memoryCacheType,
+        INamedTypeSymbol? distributedCacheType,
+        INamedTypeSymbol? hybridCacheType)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Determine if this is a cache method call
+        bool isCacheCall = false;
+        var receiverType = invocation.Instance?.Type ?? targetMethod.ContainingType;
+        if (receiverType is null)
+            return;
+
+        if (memoryCacheType is not null &&
+            MemoryCacheMethods.Contains(targetMethod.Name) &&
+            ImplementsInterface(receiverType, memoryCacheType))
+            isCacheCall = true;
+
+        if (!isCacheCall && distributedCacheType is not null &&
+            DistributedCacheMethods.Contains(targetMethod.Name) &&
+            ImplementsInterface(receiverType, distributedCacheType))
+            isCacheCall = true;
+
+        if (!isCacheCall && hybridCacheType is not null &&
+            HybridCacheMethods.Contains(targetMethod.Name) &&
+            DerivesFromOrImplements(receiverType, hybridCacheType, null))
+            isCacheCall = true;
+
+        if (!isCacheCall)
+            return;
+
+        // Extract key argument (first parameter)
+        if (invocation.Arguments.Length == 0)
+            return;
+
+        var keyArg = invocation.Arguments[0];
+        if (keyArg.Parameter?.Type?.SpecialType != SpecialType.System_String)
+            return;
+
+        // Check if the key includes tenant context
+        var keyValue = keyArg.Value;
+        while (keyValue is IConversionOperation conv)
+            keyValue = conv.Operand;
+
+        if (KeyIncludesTenantContext(keyValue, options))
+            return;
+
+        // Non-constant key — skip (can't analyze)
+        if (!keyValue.ConstantValue.HasValue &&
+            keyValue is not IInterpolatedStringOperation)
+            return;
+
+        // Check if the method also touches tenant-scoped data
+        if (!MethodTouchesTenantData(context.ContainingSymbol, model))
+            return;
+
+        var keyText = keyValue.ConstantValue.HasValue
+            ? keyValue.ConstantValue.Value?.ToString() ?? "<key>"
+            : ExtractInterpolationText(keyValue);
+
+        var location = keyArg.Syntax?.GetLocation() ?? invocation.Syntax.GetLocation();
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL006,
+            location,
+            keyText));
+    }
+
+    private static bool ImplementsInterface(ITypeSymbol type, INamedTypeSymbol interfaceType)
+    {
+        if (type.Equals(interfaceType, SymbolEqualityComparer.Default))
+            return true;
+        foreach (var iface in type.AllInterfaces)
+        {
+            if (iface.Equals(interfaceType, SymbolEqualityComparer.Default))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool KeyIncludesTenantContext(IOperation keyOp, ConfigOptions options)
+    {
+        // For interpolated strings, check if any expression references tenant
+        if (keyOp is IInterpolatedStringOperation interpolated)
+        {
+            foreach (var part in interpolated.Parts)
+            {
+                if (part is IInterpolationOperation interpolation)
+                {
+                    if (ReferencesTenanValue(interpolation.Expression, options))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool ReferencesTenanValue(IOperation operation, ConfigOptions options)
+    {
+        // Check if the expression references a member with tenant-related name
+        if (operation is IMemberReferenceOperation memberRef)
+        {
+            var memberName = memberRef.Member.Name;
+            foreach (var propName in options.TenantPropertyNames)
+            {
+                if (memberName.IndexOf(propName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            if (memberName.IndexOf("Tenant", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        }
+
+        if (operation is ILocalReferenceOperation localRef)
+        {
+            var localName = localRef.Local.Name;
+            foreach (var propName in options.TenantPropertyNames)
+            {
+                if (localName.IndexOf(propName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            if (localName.IndexOf("Tenant", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        }
+
+        if (operation is IParameterReferenceOperation paramRef)
+        {
+            var paramName = paramRef.Parameter.Name;
+            foreach (var propName in options.TenantPropertyNames)
+            {
+                if (paramName.IndexOf(propName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            if (paramName.IndexOf("Tenant", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string ExtractInterpolationText(IOperation keyOp)
+    {
+        if (keyOp is IInterpolatedStringOperation interpolated)
+        {
+            var parts = new System.Text.StringBuilder();
+            foreach (var part in interpolated.Parts)
+            {
+                if (part is IInterpolatedStringTextOperation textPart &&
+                    textPart.ConstantValue.HasValue)
+                    parts.Append(textPart.ConstantValue.Value);
+                else
+                    parts.Append("{...}");
+            }
+            return parts.ToString();
+        }
+        return "<key>";
+    }
+
+    private static bool MethodTouchesTenantData(ISymbol? containingSymbol, TenantModel model)
+    {
+        // Walk up to find the enclosing method
+        var method = containingSymbol;
+        while (method is not null && method is not IMethodSymbol)
+            method = method.ContainingSymbol;
+
+        if (method is not IMethodSymbol methodSymbol)
+            return false;
+
+        // Check if the method's containing type has any DbSet<T> properties where T is tenant-scoped
+        var containingType = methodSymbol.ContainingType;
+        if (containingType is null)
+            return false;
+
+        // Check the type's fields/properties for DbContext references
+        foreach (var member in containingType.GetMembers())
+        {
+            ITypeSymbol? memberType = null;
+            if (member is IFieldSymbol f)
+                memberType = f.Type;
+            else if (member is IPropertySymbol p)
+                memberType = p.Type;
+
+            if (memberType is null)
+                continue;
+
+            // Check if the type is a DbContext with tenant entities
+            if (IsDbContextWithTenantEntities(memberType, model))
+                return true;
+        }
+
+        // Also check method parameters
+        foreach (var param in methodSymbol.Parameters)
+        {
+            if (IsDbContextWithTenantEntities(param.Type, model))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsDbContextWithTenantEntities(ITypeSymbol type, TenantModel model)
+    {
+        // Check if any of the model's tenant entities have this as their DbContext type
+        var namedType = type as INamedTypeSymbol;
+        if (namedType is null)
+            return false;
+
+        foreach (var kvp in model.TenantEntities)
+        {
+            if (SymbolEqualityComparer.Default.Equals(kvp.Value.DbContextType, namedType))
+                return true;
+        }
+
+        return false;
+    }
+
+    // ---------------------------------------------------------------
+    // TL009: RLS session variable leak
+    // ---------------------------------------------------------------
+
+    private static readonly Regex SetSessionVarPattern = new(
+        @"\bSET\s+(?!LOCAL\b)(\w+\.\w+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SetConfigFalsePattern = new(
+        @"\bset_config\s*\([^,]+,\s*[^,]+,\s*false\s*\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static void AnalyzeRlsSessionVariable(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        INamedTypeSymbol relationalDbFacadeExtensions)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        if (!RawSqlMethodNames.Contains(targetMethod.Name))
+            return;
+
+        var originalMethod = targetMethod.ReducedFrom ?? targetMethod;
+        var containingType = originalMethod.ContainingType;
+        if (containingType is null ||
+            !containingType.Equals(relationalDbFacadeExtensions, SymbolEqualityComparer.Default))
+            return;
+
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        if (!SqlAnalyzer.TryExtractSqlFromInvocation(invocation, "sql", out var sqlText))
+            return;
+
+        ReportRlsIfNeeded(context, invocation.Syntax, sqlText);
+    }
+
+    private static void AnalyzeRlsCommandText(
+        OperationAnalysisContext context,
+        ConfigOptions options,
+        INamedTypeSymbol? dbCommandType,
+        INamedTypeSymbol? iDbCommandType)
+    {
+        var assignment = (ISimpleAssignmentOperation)context.Operation;
+
+        if (assignment.Target is not IPropertyReferenceOperation propertyRef)
+            return;
+
+        if (propertyRef.Property.Name != "CommandText")
+            return;
+
+        var receiverType = propertyRef.Instance?.Type;
+        if (receiverType is null)
+            return;
+
+        if (!DerivesFromOrImplements(receiverType, dbCommandType, iDbCommandType))
+            return;
+
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        if (!SqlAnalyzer.TryExtractSqlFromOperation(assignment.Value, out var sqlText))
+            return;
+
+        ReportRlsIfNeeded(context, assignment.Syntax, sqlText);
+    }
+
+    private static void ReportRlsIfNeeded(OperationAnalysisContext context, SyntaxNode syntax, string sqlText)
+    {
+        // Check for SET without LOCAL
+        var setMatch = SetSessionVarPattern.Match(sqlText);
+        if (setMatch.Success)
+        {
+            // Make sure it's not SET LOCAL, SET TRANSACTION, etc.
+            var before = sqlText.Substring(0, setMatch.Index + 3);
+            if (!before.EndsWith("SET", StringComparison.OrdinalIgnoreCase))
+            {
+                // Probably part of a larger word
+            }
+            else
+            {
+                var afterSet = sqlText.Substring(setMatch.Index + 3).TrimStart();
+                if (!afterSet.StartsWith("LOCAL", StringComparison.OrdinalIgnoreCase) &&
+                    !afterSet.StartsWith("TRANSACTION", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        Descriptors.TL009,
+                        syntax.GetLocation(),
+                        "SET " + setMatch.Groups[1].Value));
+                    return;
+                }
+            }
+        }
+
+        // Check for set_config(..., false)
+        if (SetConfigFalsePattern.IsMatch(sqlText))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                Descriptors.TL009,
+                syntax.GetLocation(),
+                "set_config(..., false)"));
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // TL008: Background service without tenant scope
+    // ---------------------------------------------------------------
+
+    private static void AnalyzeBackgroundService(
+        SymbolAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol? backgroundServiceType,
+        INamedTypeSymbol? hostedServiceType)
+    {
+        var type = (INamedTypeSymbol)context.Symbol;
+
+        // Check [CrossTenant] exemption on the class
+        if (HasCrossTenantAttribute(type, options.CrossTenantAttribute))
+            return;
+
+        // Check if this type is a BackgroundService or IHostedService
+        var isBackground = false;
+        if (backgroundServiceType is not null && DerivesFrom(type, backgroundServiceType))
+            isBackground = true;
+
+        if (!isBackground && hostedServiceType is not null)
+        {
+            foreach (var iface in type.AllInterfaces)
+            {
+                if (iface.Equals(hostedServiceType, SymbolEqualityComparer.Default))
+                {
+                    isBackground = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isBackground)
+            return;
+
+        // Check if the type has a DbContext field/parameter with tenant entities
+        var hasDbContext = false;
+        var hasScope = false;
+        var hasTenantSet = false;
+
+        foreach (var member in type.GetMembers())
+        {
+            ITypeSymbol? memberType = null;
+            if (member is IFieldSymbol f)
+                memberType = f.Type;
+            else if (member is IPropertySymbol p)
+                memberType = p.Type;
+
+            if (memberType is null)
+                continue;
+
+            if (IsDbContextWithTenantEntities(memberType, model))
+                hasDbContext = true;
+
+            // Check if it has IServiceScopeFactory
+            if (memberType.Name == "IServiceScopeFactory" || memberType.Name == "IServiceProvider")
+                hasScope = true;
+
+            // Check for tenant-setting services
+            if (memberType.Name == "ICurrentTenant" ||
+                memberType.Name.Contains("TenantContext") ||
+                memberType.Name.Contains("TenantAccessor"))
+                hasTenantSet = true;
+        }
+
+        if (!hasDbContext)
+            return;
+
+        if (hasScope || hasTenantSet)
+            return;
+
+        var location = type.Locations.FirstOrDefault() ?? Location.None;
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL008,
+            location,
+            type.Name));
     }
 }
 

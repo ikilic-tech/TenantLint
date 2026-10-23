@@ -187,4 +187,104 @@ internal static class Descriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL902.md");
+
+    public static readonly DiagnosticDescriptor TL006 = new(
+        id: "TL006",
+        title: "Cache key does not include tenant identifier",
+        messageFormat: "Cache key '{0}' does not include a tenant identifier; cached data may leak between tenants. Include the tenant ID in the cache key.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL006.md");
+
+    public static readonly DiagnosticDescriptor TL007 = new(
+        id: "TL007",
+        title: "Tenant context stored in static field",
+        messageFormat: "Static field '{0}' holds tenant state; tenant values in static fields are shared across all requests and tenants",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL007.md");
+
+    public static readonly DiagnosticDescriptor TL007Captive = new(
+        id: "TL007",
+        title: "Singleton captures scoped tenant service",
+        messageFormat: "Singleton '{0}' captures '{1}' which appears to be a scoped tenant service; the first request's tenant will be used for all requests",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL007.md");
+
+    public static readonly DiagnosticDescriptor TL008 = new(
+        id: "TL008",
+        title: "Background service uses tenant-scoped DbContext without explicit scope",
+        messageFormat: "Background service '{0}' uses a DbContext with tenant-scoped entities without creating a scope or setting the tenant context; tenant identity must be set explicitly in background services",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL008.md");
+
+    public static readonly DiagnosticDescriptor TL009 = new(
+        id: "TL009",
+        title: "RLS session variable uses session scope instead of transaction-local",
+        messageFormat: "'{0}' uses session scope; the value persists across pooled connections and may leak to other tenants. Use 'SET LOCAL' or 'set_config(..., true)' for transaction-local scope.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL009.md");
+
+    public static readonly DiagnosticDescriptor TL014 = new(
+        id: "TL014",
+        title: "ABP tenant-filter bypass",
+        messageFormat: "Disabling the ABP multi-tenant filter via {0}() removes tenant isolation. Mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL014.md");
+
+    public static readonly DiagnosticDescriptor TL014Change = new(
+        id: "TL014",
+        title: "ABP tenant context switch",
+        messageFormat: "Switching tenant context via ICurrentTenant.Change() affects tenant isolation. Mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL014.md");
+
+    public static readonly DiagnosticDescriptor TL015 = new(
+        id: "TL015",
+        title: "Finbuckle TenantMismatchMode.Ignore allows cross-tenant writes",
+        messageFormat: "TenantMismatchMode.Ignore allows entities to be saved with a mismatched TenantId; cross-tenant writes will silently succeed. Use TenantMismatchMode.Throw (default) or [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL015.md");
+
+    public static readonly DiagnosticDescriptor TL201 = new(
+        id: "TL201",
+        title: "#pragma warning disable TL rule without justification",
+        messageFormat: "#pragma warning disable {0} should have a justification comment explaining why the tenant check is suppressed",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL201.md");
+
+    public static readonly DiagnosticDescriptor TL202 = new(
+        id: "TL202",
+        title: "[SuppressMessage] targeting TL rule without justification",
+        messageFormat: "[SuppressMessage] targeting {0} should include a Justification explaining why the tenant check is suppressed",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL202.md");
+
+    public static readonly DiagnosticDescriptor TL203 = new(
+        id: "TL203",
+        title: "Tenant isolation rules globally disabled",
+        messageFormat: "Tenant isolation rules [{0}] are globally disabled via NoWarn or .editorconfig; suppressing tenant checks hides potential cross-tenant data leaks",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL203.md",
+        customTags: new[] { WellKnownDiagnosticTags.CompilationEnd });
 }
