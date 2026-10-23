@@ -1,2 +1,5 @@
 [*.cs]
 tenantlint.global_entities = Tenant, Country
+
+# Elevate TL008 to Warning so it appears in build output (Info by default)
+dotnet_diagnostic.TL008.severity = warning
