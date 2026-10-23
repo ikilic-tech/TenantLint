@@ -177,6 +177,125 @@ public class {|#1:AppDbContext|} : DbContext
         await Verify.VerifyWithEfCoreAsync(source, expectedTL105, expectedTL900);
     }
 
+    [Fact]
+    public async Task DynamicFilterLoop_ReflectionBased_ReportsTL105()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Reflection;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class {|#1:AppDbContext|} : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        var method = GetType().GetMethod(""ApplyFilter"", BindingFlags.NonPublic | BindingFlags.Instance);
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            method.MakeGenericMethod(entityType.ClrType).Invoke(this, new object[] { modelBuilder });
+        }
+    }
+
+    private void ApplyFilter<T>(ModelBuilder builder) where T : class { }
+}
+";
+        var expectedTL105 = Verify.Diagnostic(Descriptors.TL105)
+            .WithLocation(0)
+            .WithArguments("Customer", "TenantId", "AppDbContext");
+
+        var expectedTL900 = Verify.Diagnostic("TL900")
+            .WithLocation(1)
+            .WithArguments("AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL105, expectedTL900);
+    }
+
+    [Fact]
+    public async Task DynamicFilterLoop_ExpressionBased_ReportsTL105()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Linq.Expressions;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class {|#1:AppDbContext|} : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            var filter = CreateFilter(entityType.ClrType);
+            // Filter applied through a non-ModelBuilder helper — invisible to one-level following
+        }
+    }
+
+    private static LambdaExpression CreateFilter(Type type) => throw new NotImplementedException();
+}
+";
+        var expectedTL105 = Verify.Diagnostic(Descriptors.TL105)
+            .WithLocation(0)
+            .WithArguments("Customer", "TenantId", "AppDbContext");
+
+        var expectedTL900 = Verify.Diagnostic("TL900")
+            .WithLocation(1)
+            .WithArguments("AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL105, expectedTL900);
+    }
+
+    [Fact]
+    public async Task DynamicFilterLoop_NoFilterCall_ReportsTL105()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using System;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class {|#1:AppDbContext|} : DbContext
+{
+    public DbSet<Customer> {|#0:Customers|} { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            Console.WriteLine(entityType.ClrType.Name);
+        }
+    }
+}
+";
+        var expectedTL105 = Verify.Diagnostic(Descriptors.TL105)
+            .WithLocation(0)
+            .WithArguments("Customer", "TenantId", "AppDbContext");
+
+        var expectedTL900 = Verify.Diagnostic("TL900")
+            .WithLocation(1)
+            .WithArguments("AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL105, expectedTL900);
+    }
+
     // ===========================================================
     // Negative — no diagnostic
     // ===========================================================

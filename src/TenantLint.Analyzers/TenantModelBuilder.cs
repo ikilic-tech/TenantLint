@@ -579,7 +579,10 @@ internal sealed class TenantModelBuilder
 
     private bool DetectDynamicFilters(MethodDeclarationSyntax method, SemanticModel semanticModel)
     {
-        // Look for foreach loops over GetEntityTypes()
+        // A GetEntityTypes() loop in OnModelCreating (or a method it calls) is
+        // sufficient evidence that filters may be applied dynamically — even if
+        // HasQueryFilter/SetQueryFilter is not visible (e.g. applied via
+        // reflection or a helper that doesn't receive ModelBuilder).
         foreach (var foreachStatement in method.DescendantNodes().OfType<ForEachStatementSyntax>())
         {
             if (foreachStatement.Expression is not InvocationExpressionSyntax foreachInvocation)
@@ -589,21 +592,8 @@ internal sealed class TenantModelBuilder
             if (foreachSymbol is null)
                 continue;
 
-            if (foreachSymbol.Name != "GetEntityTypes")
-                continue;
-
-            // Check if the loop body contains HasQueryFilter or SetQueryFilter calls
-            var loopBody = foreachStatement.Statement;
-            foreach (var innerInvocation in loopBody.DescendantNodes().OfType<InvocationExpressionSyntax>())
-            {
-                var innerSymbol = semanticModel.GetSymbolInfo(innerInvocation).Symbol as IMethodSymbol;
-                if (innerSymbol is null)
-                    continue;
-
-                var innerName = (innerSymbol.ReducedFrom ?? innerSymbol).Name;
-                if (innerName == "HasQueryFilter" || innerName == "SetQueryFilter")
-                    return true;
-            }
+            if (foreachSymbol.Name == "GetEntityTypes")
+                return true;
         }
 
         return false;
