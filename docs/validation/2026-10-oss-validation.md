@@ -477,3 +477,10 @@ with `TenantId` from `IMultiTenant` in an ABP context are correctly marked
    `IgnoreQueryFilters()` is used in modules we don't build (identity, todo, etc.) — these
    would require building each module project individually with the analyzer. This is
    expected behavior, not a bug in TenantLint.
+
+---
+
+## Billing entity query analysis (fullstackhero)
+
+Round 2 also surfaced potential issues in a third-party project. They are being
+reported privately to the maintainers and will not be published here until fixed.
