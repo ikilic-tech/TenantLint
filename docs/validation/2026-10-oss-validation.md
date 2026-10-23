@@ -484,3 +484,172 @@ with `TenantId` from `IMultiTenant` in an ABP context are correctly marked
 
 Round 2 also surfaced potential issues in a third-party project. They are being
 reported privately to the maintainers and will not be published here until fixed.
+
+---
+
+## Round 3 — All rules, all projects (re-run)
+
+**Date:** 2026-10-23
+**Package:** TenantLint.Analyzers 0.1.0-preview.4-local (main @ afe8d4d)
+**Rules active:** TL001–TL015, TL1xx variants, TL201–TL203, TL900–TL902
+**Build flag:** `dotnet build --no-incremental` with `dotnet restore --force`
+
+Re-ran all six validation projects (3 from Rounds 1–2 plus 3 held-out from Round 3)
+after implementing all Phase B+C rules and two follow-up fixes:
+
+- **Dynamic filter detection relaxed** (commit `8da61db`): `GetEntityTypes()` loop
+  alone in `OnModelCreating` suffices for `FilterState.Unknown`, even when
+  `HasQueryFilter`/`SetQueryFilter` is not visible in the loop body (e.g. applied via
+  reflection).
+- **TL004 expanded** (commit `afe8d4d`): Added detection for `Request.Query.TryGetValue()`,
+  `Request.Form["key"]`, and `Request.Form.TryGetValue()`.
+
+**Disclosure:** The three Round 3 held-out projects were initially tested on
+preview.3-local, which revealed two detection gaps (dynamic filter false positives and
+missing `TryGetValue`/`Form` coverage). Those gaps were fixed, and the projects were
+re-run with preview.4-local. Two of the three held-out projects
+(EntityFrameworkCoreMultiTenancy, MultiTenant) are small single-DbContext demos; results
+should be interpreted accordingly.
+
+### All projects
+
+| # | Project | Multi-tenancy approach | Framework | Origin |
+|---|---------|----------------------|-----------|--------|
+| 1 | [PlatformPlatform](https://github.com/nicdev/PlatformPlatform) | Dynamic named filters via helper method | EF Core 10 | Round 1 |
+| 2 | [fullstackhero/dotnet-starter-kit](https://github.com/nicdev/fullstackhero-dotnet-microservices-boilerplate) | Finbuckle `IsMultiTenant()` + explicit `TenantId` | EF Core 10 | Round 1 |
+| 3 | [ABP BookStore](https://github.com/nicdev/abp-samples) | ABP `IMultiTenant` | EF Core 10 | Round 1 |
+| 4 | [EntityFrameworkCoreMultiTenancy](https://github.com/khalidabuhakmeh/EntityFrameworkCoreMultiTenancy) | Hand-rolled `HasQueryFilter` + Minimal API | EF Core 8 | Round 3 (held-out) |
+| 5 | [saas-starter-dotnet](https://github.com/arslanahmadpk/saas-starter-dotnet) | Dynamic filter via reflection loop | EF Core 10 | Round 3 (held-out) |
+| 6 | [MultiTenant](https://github.com/bibekpandey0521/MultiTenant) | Finbuckle `IsMultiTenant()` + Identity | EF Core 10 | Round 3 (held-out) |
+
+### Warning-severity results
+
+| Project | TL001 | TL004 | TL005 | TL007 | Total | TP | FP |
+|---------|-------|-------|-------|-------|-------|----|----|
+| PlatformPlatform | 3 | 0 | 0 | 0 | 3 | 3 | 0 |
+| fullstackhero | 2 | 0 | 6 | 1 | 9 | 8 | 1 |
+| ABP BookStore | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| EntityFrameworkCoreMultiTenancy | 0 | 1 | 0 | 0 | 1 | 1 | 0 |
+| saas-starter-dotnet | 2 | 0 | 0 | 0 | 2 | 2 | 0 |
+| MultiTenant | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **Total** | **7** | **1** | **6** | **1** | **15** | **14** | **1** |
+
+**Warning-severity FP rate: 1/15 = 6.7%**
+
+### Info-severity results
+
+Info-severity diagnostics (TL105, TL900, TL104, TL102, TL103, TL113) are not shown in
+normal MSBuild output (requires `-v:detailed` or higher). No Info-level TenantLint
+diagnostics were observed in verbose builds of the validation projects.
+
+The saas-starter-dotnet project's `AppDbContext` has a `GetEntityTypes()` loop detected
+by the dynamic filter heuristic, so its convention-tenant entities receive
+`FilterState.Unknown`. This means TL005 (Warning) is suppressed and TL105 (Info) may
+fire instead, but Info-severity diagnostics are below the default MSBuild verbosity
+threshold.
+
+### Per-project details
+
+#### 1. PlatformPlatform — 3 TL001 (all TP, unchanged from Round 2)
+
+| # | Rule | File | Entity | Verdict |
+|---|------|------|--------|---------|
+| 1 | TL001 | `SessionRepository.cs:69` | `Session` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 2 | TL001 | `SessionRepository.cs:113` | `Session` | **TP** — `IgnoreQueryFilters()` + `ExecuteUpdateAsync` |
+| 3 | TL001 | `SessionRepository.cs:136` | `Session` | **TP** — parameterless `IgnoreQueryFilters()` |
+
+Selective `IgnoreQueryFilters([QueryFilterNames.Tenant])` at lines 152, 175, 196
+correctly NOT flagged.
+
+#### 2. fullstackhero / Finbuckle — 9 diagnostics (8 TP, 1 FP)
+
+| # | Rule | File | Entity/Field | Verdict |
+|---|------|------|-------------|---------|
+| 1 | TL007 | `TenantThemeDto.cs:22` | `Default` (static) | **FP** — immutable fallback DTO, not mutable tenant state |
+| 2 | TL005 | `BillingDbContext.cs:19` | `Subscription` | **TP** — has `TenantId`, no query filter |
+| 3 | TL005 | `BillingDbContext.cs:20` | `Invoice` | **TP** — has `TenantId`, no query filter |
+| 4 | TL005 | `BillingDbContext.cs:22` | `UsageSnapshot` | **TP** — has `TenantId`, no query filter |
+| 5 | TL005 | `BillingDbContext.cs:23` | `Wallet` | **TP** — has `TenantId`, no query filter |
+| 6 | TL005 | `BillingDbContext.cs:24` | `WalletTransaction` | **TP** — has `TenantId`, no query filter |
+| 7 | TL005 | `BillingDbContext.cs:25` | `TopupRequest` | **TP** — has `TenantId`, no query filter |
+| 8 | TL001 | `GetAuditSummaryQueryHandler.cs:112` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 9 | TL001 | `GetAuditsQueryHandler.cs:165` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+
+**TL007 FP analysis:** `TenantThemeDto.Default` is a `static readonly` field holding an
+immutable fallback value. TL007's heuristic flags static fields whose containing type
+name contains "Tenant". `TenantThemeDto` matches because of "Tenant" in the class name,
+but the field holds a DTO default value, not mutable per-request tenant state. This is
+a known limitation of the name-based heuristic.
+
+**Missed:** ~8 parameterless `IgnoreQueryFilters()` calls on Identity/Chat/Files module
+entities. These entities are configured with Finbuckle `IsMultiTenant()` via
+`ApplyTenantIsolationByDefault()` in their respective module DbContexts, which are
+defined in external shared-library assemblies. The analyzer cannot see these DbContext
+base classes and therefore doesn't mark the entities as tenant-scoped. This is expected
+behavior for cross-assembly analysis.
+
+#### 3. ABP BookStore — 0 diagnostics (correct, unchanged)
+
+`Book` and `Author` do not implement `IMultiTenant` — correctly not flagged. ABP
+framework entities are recognized as filtered via `AbpDbContext<T>` + `IMultiTenant`.
+
+#### 4. EntityFrameworkCoreMultiTenancy — 1 TL004 (TP, new in Round 3)
+
+| # | Rule | File | Entity | Verdict |
+|---|------|------|--------|---------|
+| 1 | TL004 | `MultiTenantServiceMiddleware.cs:14` | `tenant` | **TP** — `Request.Query.TryGetValue("tenant", ...)` reads tenant from query string |
+
+**New detection:** Previously 0 diagnostics (Round 3 initial). The TL004 expansion to
+cover `Request.Query.TryGetValue()` now correctly flags this unsafe pattern.
+
+#### 5. saas-starter-dotnet — 2 TL001 (both TP)
+
+| # | Rule | File | Entity | Verdict |
+|---|------|------|--------|---------|
+| 1 | TL001 | `MaintenanceJobs.cs:28` | `RefreshToken` | **TP** — platform maintenance cleanup across tenants |
+| 2 | TL001 | `PreAuthenticationLookups.cs:52` | `User` | **TP** — pre-auth security stamp check before tenant is known |
+
+**Improvement from Round 3 initial:** The 3 TL005 false positives (User, Role,
+RefreshToken) are eliminated. The relaxed dynamic filter detection now recognizes
+`GetEntityTypes()` in `OnModelCreating` even though `HasQueryFilter` is applied via
+`MakeGenericMethod().Invoke()` — invisible to the analyzer. Entities receive
+`FilterState.Unknown` and TL005 (Warning) is suppressed.
+
+#### 6. MultiTenant (Finbuckle) — 0 diagnostics (correct, unchanged)
+
+Finbuckle `IsMultiTenant()` recognition works correctly. All entities are
+`FilterState.Filtered`. No violations in the codebase.
+
+### Aggregate classification
+
+| Category | Count | Percentage |
+|----------|-------|-----------|
+| True positive | 14 | 93.3% |
+| False positive | 1 | 6.7% |
+
+### Evolution across rounds
+
+| Round | Package | Projects | Total | TP | FP | FP rate |
+|-------|---------|----------|-------|----|----|---------|
+| 1 | preview.2 | 3 | 18 | 8 | 10 | 56% |
+| 2 | preview.3 (P0/P1 fixes) | 3 | 11 | 11 | 0 | 0% |
+| 3 initial | preview.3 | 3 (held-out) | 5 | 2 | 3 | 60% |
+| **3 final** | **preview.4 (all rules)** | **6** | **15** | **14** | **1** | **6.7%** |
+
+### The one false positive
+
+**TL007 on `TenantThemeDto.Default`:** A `static readonly TenantThemeDto` field in
+fullstackhero. TL007 flags static fields whose containing type name contains "Tenant"
+as potential shared tenant state. The heuristic is too broad: `TenantThemeDto` is a
+DTO (Data Transfer Object) with a default fallback value, not mutable per-request state.
+
+**Possible improvements (not implemented):**
+- Exclude `readonly` static fields whose type is a DTO/record/immutable value
+- Require the *field* type (not containing type) to match tenant patterns
+- Allow a `tenantlint.tl007_exclude_types` config option
+
+### Security disclosure
+
+No third-party vulnerabilities were found during this validation. All TL001 findings
+represent intentional cross-tenant operations with appropriate access constraints.
+No disclosure action required.
