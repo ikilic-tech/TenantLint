@@ -7,11 +7,6 @@ Roslyn analyzers that catch **cross-tenant data leaks** in multi-tenant .NET app
 [![CI](https://github.com/ikilic-tech/TenantLint/actions/workflows/ci.yml/badge.svg)](https://github.com/ikilic-tech/TenantLint/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Demo
-
-<!-- TODO: record demo.gif showing TL001 + code fix in the IDE -->
-![TenantLint in action](docs/assets/demo.gif)
-
 ## The problem
 
 In multi-tenant SaaS, the most dangerous bugs are silent: a LINQ query
