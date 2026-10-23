@@ -123,6 +123,30 @@ internal sealed class ConfigOptions
             tenantMarkerInterfaces: ImmutableHashSet<string>.Empty);
     }
 
+    internal static ConfigOptions CreateWithFilteredBaseTypes(params string[] baseTypes)
+    {
+        return new ConfigOptions(
+            DefaultTenantPropertyNames,
+            DeriveColumnNames(DefaultTenantPropertyNames),
+            ImmutableHashSet<string>.Empty,
+            tenantFilterName: null,
+            crossTenantAttribute: "CrossTenant",
+            filteredBaseTypes: ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, baseTypes),
+            tenantMarkerInterfaces: ImmutableHashSet<string>.Empty);
+    }
+
+    internal static ConfigOptions CreateWithTenantMarkerInterfaces(params string[] interfaces)
+    {
+        return new ConfigOptions(
+            DefaultTenantPropertyNames,
+            DeriveColumnNames(DefaultTenantPropertyNames),
+            ImmutableHashSet<string>.Empty,
+            tenantFilterName: null,
+            crossTenantAttribute: "CrossTenant",
+            filteredBaseTypes: ImmutableHashSet<string>.Empty,
+            tenantMarkerInterfaces: ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, interfaces));
+    }
+
     internal static ConfigOptions CreateWithGlobalEntities(params string[] globalEntities)
     {
         return new ConfigOptions(

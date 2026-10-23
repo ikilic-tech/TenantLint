@@ -30,6 +30,14 @@ internal sealed class TenantModelBuilder
     private readonly Dictionary<INamedTypeSymbol, string> _poolingUnsafeFields =
         new(SymbolEqualityComparer.Default);
 
+    // Contexts whose external base is in filtered_base_types → convention entities get Filtered
+    private readonly HashSet<INamedTypeSymbol> _filteredBaseContexts =
+        new(SymbolEqualityComparer.Default);
+
+    // Contexts with an unknown external base → convention entities get Unknown (TL105)
+    private readonly HashSet<INamedTypeSymbol> _externalBaseContexts =
+        new(SymbolEqualityComparer.Default);
+
     public TenantModelBuilder(Compilation compilation, ConfigOptions options)
     {
         _compilation = compilation;
@@ -62,6 +70,9 @@ internal sealed class TenantModelBuilder
         // EF Core only allows HasQueryFilter on root entities; the filter applies to all derived types.
         PropagateInheritedFilters();
 
+        // Check for external base classes that may or may not apply tenant filters.
+        ApplyExternalBaseHeuristic(contextTypes);
+
         // Build immutable result
         var entitiesBuilder = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TenantEntityInfo>(
             SymbolEqualityComparer.Default);
@@ -79,13 +90,14 @@ internal sealed class TenantModelBuilder
 
             // Determine filter state
             FilterState filterState;
-            if (mutable.HasExplicitFilter)
+            if (mutable.HasExplicitFilter || _filteredBaseContexts.Contains(mutable.DbContextType))
             {
                 filterState = FilterState.Filtered;
             }
-            else if (_dynamicFilterContexts.Contains(mutable.DbContextType))
+            else if (_dynamicFilterContexts.Contains(mutable.DbContextType) ||
+                     _externalBaseContexts.Contains(mutable.DbContextType))
             {
-                // Dynamic filters detected but we can't confirm coverage — mark Unknown
+                // Dynamic filters or unknown external base — can't confirm coverage
                 filterState = FilterState.Unknown;
             }
             else
@@ -987,6 +999,43 @@ internal sealed class TenantModelBuilder
 
                 // Also check entities not in the dict but whose type has a filter
                 // (e.g., base entity not exposed as DbSet but has HasQueryFilter)
+                baseType = baseType.BaseType;
+            }
+        }
+    }
+
+    private void ApplyExternalBaseHeuristic(ImmutableArray<INamedTypeSymbol> contextTypes)
+    {
+        foreach (var contextType in contextTypes)
+        {
+            if (_filteredBaseContexts.Contains(contextType) ||
+                _externalBaseContexts.Contains(contextType))
+                continue;
+
+            var baseType = contextType.BaseType;
+            while (baseType is not null)
+            {
+                // Skip DbContext itself — it's the EF Core base
+                if (baseType.Equals(_dbContextType, SymbolEqualityComparer.Default))
+                    break;
+
+                // If the base is defined outside the current compilation (no syntax references),
+                // it's an external base class.
+                if (baseType.DeclaringSyntaxReferences.Length == 0)
+                {
+                    // Check if it's in filtered_base_types
+                    if (_options.FilteredBaseTypes.Contains(baseType.Name) ||
+                        _options.FilteredBaseTypes.Contains(baseType.ToDisplayString()))
+                    {
+                        _filteredBaseContexts.Add(contextType);
+                    }
+                    else
+                    {
+                        _externalBaseContexts.Add(contextType);
+                    }
+                    break;
+                }
+
                 baseType = baseType.BaseType;
             }
         }

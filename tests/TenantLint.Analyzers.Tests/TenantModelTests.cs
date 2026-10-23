@@ -897,6 +897,160 @@ public class AppDbContext : DbContext
             model.TenantEntities.Keys.First()));
     }
 
+    // ===== EXTERNAL BASE HEURISTIC =====
+
+    private static async Task<TenantModel> BuildModelWithExternalBaseAsync(
+        string source,
+        string externalBaseSource,
+        ConfigOptions? options = null)
+    {
+        var references = await Verify.Net80WithEfCore.ResolveAsync(
+            LanguageNames.CSharp, TestContext.Current.CancellationToken);
+
+        // Compile the external base class into a separate assembly
+        var baseCompilation = CSharpCompilation.Create(
+            "ExternalBaseAssembly",
+            new[] { CSharpSyntaxTree.ParseText(externalBaseSource) },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var ms = new System.IO.MemoryStream();
+        var emitResult = baseCompilation.Emit(ms);
+        Assert.True(emitResult.Success,
+            string.Join("\n", emitResult.Diagnostics.Select(d => d.ToString())));
+        ms.Position = 0;
+        var baseRef = MetadataReference.CreateFromStream(ms);
+
+        // Build the main compilation with the external base as a reference
+        var allReferences = references.Append(baseRef).ToArray();
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { CSharpSyntaxTree.ParseText(source) },
+            allReferences,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        options ??= ConfigOptions.CreateDefault();
+        var builder = new TenantModelBuilder(compilation, options);
+        return builder.Build();
+    }
+
+    [Fact]
+    public async Task ExternalBase_Unrecognized_FilterStateUnknown()
+    {
+        var externalBase = @"
+using Microsoft.EntityFrameworkCore;
+public abstract class SomeBase : DbContext { }
+";
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : SomeBase
+{
+    public DbSet<Customer> Customers { get; set; }
+}
+";
+        var model = await BuildModelWithExternalBaseAsync(source, externalBase);
+
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Unknown, entity.FilterState);
+    }
+
+    [Fact]
+    public async Task ExternalBase_InFilteredBaseTypes_FilterStateFiltered()
+    {
+        var externalBase = @"
+using Microsoft.EntityFrameworkCore;
+public abstract class SomeBase : DbContext { }
+";
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : SomeBase
+{
+    public DbSet<Customer> Customers { get; set; }
+}
+";
+        var options = ConfigOptions.CreateWithFilteredBaseTypes("SomeBase");
+        var model = await BuildModelWithExternalBaseAsync(source, externalBase, options);
+
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+    }
+
+    [Fact]
+    public async Task InSourceBase_FilterStateUnfiltered()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public abstract class MyBase : DbContext { }
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : MyBase
+{
+    public DbSet<Customer> Customers { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Unfiltered, entity.FilterState);
+    }
+
+    [Fact]
+    public async Task ExternalBase_EntityHasExplicitFilter_StaysFiltered()
+    {
+        var externalBase = @"
+using Microsoft.EntityFrameworkCore;
+public abstract class SomeBase : DbContext { }
+";
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : SomeBase
+{
+    private string _tid = ""t1"";
+    public DbSet<Customer> Customers { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>().HasQueryFilter(e => e.TenantId == _tid);
+    }
+}
+";
+        var model = await BuildModelWithExternalBaseAsync(source, externalBase);
+
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+    }
+
     // ===== CONFIG OPTIONS: filtered_base_types and tenant_marker_interfaces =====
 
     [Fact]
@@ -986,7 +1140,7 @@ tenantlint.tenant_marker_interfaces = ITenantEntity, IMustHaveTenant
 
         public TestAnalyzerConfigOptions(Dictionary<string, string> values) => _values = values;
 
-        public override bool TryGetValue(string key, out string? value)
+        public override bool TryGetValue(string key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value)
         {
             var found = _values.TryGetValue(key, out var result);
             value = result;
