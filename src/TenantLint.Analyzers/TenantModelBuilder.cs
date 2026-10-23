@@ -23,6 +23,9 @@ internal sealed class TenantModelBuilder
     private readonly Dictionary<INamedTypeSymbol, HashSet<string>> _toTableNames =
         new(SymbolEqualityComparer.Default);
 
+    // Deferred diagnostics collected during model building (reported later by the analyzer)
+    private readonly List<DeferredDiagnostic> _deferredDiagnostics = new();
+
     public TenantModelBuilder(Compilation compilation, ConfigOptions options)
     {
         _compilation = compilation;
@@ -101,6 +104,7 @@ internal sealed class TenantModelBuilder
         return new TenantModel(
             entitiesBuilder.ToImmutable(),
             _dynamicFilterContexts.ToImmutableHashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default),
+            _deferredDiagnostics.ToImmutableArray(),
             hasEfCore: true);
     }
 
@@ -415,7 +419,13 @@ internal sealed class TenantModelBuilder
             return;
         }
 
-        // This is a tenant filter
+        // This is a tenant filter — check if the value side is rooted in `this` (TL012)
+        if (contextType is not null)
+        {
+            CheckFilterValueRooting(invocation, lambdaArg, semanticModel, entityType, contextType);
+        }
+
+        // Record the tenant filter
         var tenantProperty = FindTenantProperty(entityType);
         if (tenantProperty is null)
             return;
@@ -476,6 +486,154 @@ internal sealed class TenantModelBuilder
         names.Add(tableName);
         names.Add(tableName.ToLowerInvariant());
         names.Add(ConfigOptions.ToSnakeCase(tableName));
+    }
+
+    private void CheckFilterValueRooting(
+        InvocationExpressionSyntax invocation,
+        ExpressionSyntax lambdaArg,
+        SemanticModel semanticModel,
+        INamedTypeSymbol entityType,
+        INamedTypeSymbol contextType)
+    {
+        // Find binary expressions (== or !=) in the lambda where one side is e.TenantId
+        // and check whether the OTHER side is rooted in `this` (the DbContext instance).
+        SyntaxNode lambdaBody;
+        if (lambdaArg is SimpleLambdaExpressionSyntax simple)
+            lambdaBody = simple.Body;
+        else if (lambdaArg is ParenthesizedLambdaExpressionSyntax paren)
+            lambdaBody = paren.Body;
+        else
+            return;
+
+        foreach (var binary in lambdaBody.DescendantNodesAndSelf().OfType<BinaryExpressionSyntax>())
+        {
+            if (!binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.EqualsExpression) &&
+                !binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NotEqualsExpression))
+                continue;
+
+            // Determine which side is the entity property and which is the value
+            ExpressionSyntax? valueSide = null;
+            if (IsEntityTenantPropertyAccess(binary.Left, semanticModel))
+                valueSide = binary.Right;
+            else if (IsEntityTenantPropertyAccess(binary.Right, semanticModel))
+                valueSide = binary.Left;
+
+            if (valueSide is null)
+                continue;
+
+            // Skip constants and literals — they're intentional
+            var constant = semanticModel.GetConstantValue(valueSide);
+            if (constant.HasValue)
+                continue;
+
+            if (!IsValueRootedInInstance(valueSide, semanticModel, contextType))
+            {
+                // Get a precise location on the HasQueryFilter method name
+                var location = invocation.Expression is MemberAccessExpressionSyntax memberAccess
+                    ? memberAccess.Name.GetLocation()
+                    : invocation.GetLocation();
+
+                _deferredDiagnostics.Add(new DeferredDiagnostic(
+                    Descriptors.TL012,
+                    location,
+                    entityType.Name,
+                    contextType.Name));
+                return; // One TL012 per HasQueryFilter call is enough
+            }
+        }
+    }
+
+    private bool IsEntityTenantPropertyAccess(ExpressionSyntax expression, SemanticModel semanticModel)
+    {
+        if (expression is not MemberAccessExpressionSyntax memberAccess)
+            return false;
+
+        return _options.TenantPropertyNames.Contains(memberAccess.Name.Identifier.ValueText);
+    }
+
+    private static bool IsValueRootedInInstance(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        INamedTypeSymbol contextType)
+    {
+        // Walk to the root of the expression chain and check if it's `this` or an instance member.
+        var root = GetExpressionRoot(expression);
+
+        if (root is ThisExpressionSyntax)
+            return true;
+
+        if (root is IdentifierNameSyntax identifier)
+        {
+            var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+            return IsInstanceMemberOf(symbol, contextType);
+        }
+
+        // For invocations without a receiver (static method calls like GetTenantId()), check the symbol
+        if (root is InvocationExpressionSyntax rootInvocation)
+        {
+            var methodSymbol = semanticModel.GetSymbolInfo(rootInvocation).Symbol as IMethodSymbol;
+            if (methodSymbol is not null && methodSymbol.IsStatic)
+                return false;
+
+            // Instance method on implicit this
+            if (methodSymbol is not null && !methodSymbol.IsStatic &&
+                IsContainedInType(methodSymbol.ContainingType, contextType))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static ExpressionSyntax GetExpressionRoot(ExpressionSyntax expression)
+    {
+        var current = expression;
+        while (true)
+        {
+            if (current is MemberAccessExpressionSyntax memberAccess)
+            {
+                current = memberAccess.Expression;
+            }
+            else if (current is InvocationExpressionSyntax invocation &&
+                     invocation.Expression is MemberAccessExpressionSyntax invMemberAccess)
+            {
+                current = invMemberAccess.Expression;
+            }
+            else
+            {
+                return current;
+            }
+        }
+    }
+
+    private static bool IsInstanceMemberOf(ISymbol? symbol, INamedTypeSymbol contextType)
+    {
+        if (symbol is null)
+            return false;
+
+        if (symbol is IFieldSymbol field && !field.IsStatic &&
+            IsContainedInType(field.ContainingType, contextType))
+            return true;
+
+        if (symbol is IPropertySymbol property && !property.IsStatic &&
+            IsContainedInType(property.ContainingType, contextType))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsContainedInType(INamedTypeSymbol? containingType, INamedTypeSymbol contextType)
+    {
+        if (containingType is null)
+            return false;
+
+        var current = contextType;
+        while (current is not null)
+        {
+            if (current.Equals(containingType, SymbolEqualityComparer.Default))
+                return true;
+            current = current.BaseType;
+        }
+        return false;
     }
 
     private bool LambdaReferencesTenantProperty(SyntaxNode lambdaNode, SemanticModel semanticModel)

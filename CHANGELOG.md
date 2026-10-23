@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Rules
+
+- **TL012** (Warning): detects `HasQueryFilter` lambdas whose tenant value is not rooted in the DbContext instance (locals, static fields/properties, static method calls). EF Core caches the model — the first value is baked in and reused for every tenant. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL012.md)
+
 ### Fixed
 
 - TL005 code fix: use the actual `OnModelCreating` parameter name instead of hardcoding `modelBuilder`.

@@ -32,6 +32,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL103,
             Descriptors.TL005,
             Descriptors.TL105,
+            Descriptors.TL012,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -168,11 +169,19 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                     SymbolKind.Property);
             }
 
-            // TL900: Report dynamic filter contexts (CompilationEnd — no code fix needed)
-            if (model.DynamicFilterContexts.Count > 0)
+            // TL012 + TL900: Report deferred diagnostics and dynamic filter contexts
+            if (model.DeferredDiagnostics.Length > 0 || model.DynamicFilterContexts.Count > 0)
             {
                 compilationStartContext.RegisterCompilationEndAction(endContext =>
                 {
+                    foreach (var deferred in model.DeferredDiagnostics)
+                    {
+                        endContext.ReportDiagnostic(Diagnostic.Create(
+                            deferred.Descriptor,
+                            deferred.Location,
+                            deferred.Args));
+                    }
+
                     foreach (var contextType in model.DynamicFilterContexts)
                     {
                         var location = contextType.Locations.FirstOrDefault() ?? Location.None;

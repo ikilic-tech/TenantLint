@@ -130,6 +130,28 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
   - **Parameterless `IgnoreQueryFilters()`** removes all filters (named and unnamed).
   - **Selective `IgnoreQueryFilters(["SoftDelete"])`** removes only the specified named filter; other named filters remain active.
   - Sources: [codewithmukesh.com](https://codewithmukesh.com/blog/global-query-filters-efcore/), [gdhami-net/ef-named-query-filters-demo](https://github.com/gdhami-net/ef-named-query-filters-demo) (tested on EF Core 10.0.12).
+- **Query filter parameterization** *(Verified via spike, EF Core 8.0.32 + 10.0.12, SQLite — 2026-10-22)*:
+  - **DbContext instance field** (`_tenantId`): **Parameterized correctly.** EF Core detects that the closure captures `this.<member>` and generates a parameterized SQL query. Each new DbContext instance uses its own value. **This is the only safe pattern.**
+  - **DbContext instance field → property on stored service** (`_tenantService.TenantId`): **Parameterized correctly.** EF Core walks the member-access chain through `this._tenantService.TenantId` and re-evaluates per query.
+  - **DbContext instance field → method call on stored service** (`_resolver.GetTenantId()`): **Parameterized correctly.** The method is re-evaluated per query because the call is on a member of `this`.
+  - **Local variable** captured in `OnModelCreating`: **BAKED IN.** The value from the first `OnModelCreating` call is frozen into the cached model. All subsequent DbContext instances of the same type see the first tenant's value. **Cross-tenant data leak confirmed.**
+  - **Static field** (`StaticFieldContext.CurrentTenantId`): **BAKED IN.** Same as local — the value is read once during model building and cached forever. Changing the static field has no effect. **Cross-tenant data leak confirmed.**
+  - **Key insight:** EF Core's model cache parameterizes expressions that traverse from `this` (the DbContext instance). Any value not reachable through `this` is treated as a constant and baked into the cached model.
+  - Results identical on EF Core 8 and 10.
+- **DbContext pooling + tenant in constructor** *(Verified via spike, EF Core 8.0.32 + 10.0.12, SQLite — 2026-10-22)*:
+  - **Mutable instance field** set via `SetTenant()` after pool returns the instance: **Safe.** The query filter re-reads the mutable field per query. This is the recommended pattern for pooling.
+  - **Readonly field set in constructor** with hardcoded default: Constructor is called only once per pool slot. On re-use, the constructor is NOT re-invoked. The field retains its original value. With a constant default ("CTOR-DEFAULT"), this causes "no data returned" (silent failure, not a leak).
+  - **Readonly field set in constructor from ambient/static source** (`_tenantId = AmbientTenantId`): **CROSS-TENANT LEAK CONFIRMED.** First pool slot created for tenant-A captures "tenant-A". When the same slot is re-used for tenant-B, the readonly field still holds "tenant-A" and the query filter returns tenant-A's data to tenant-B. Same behavior with `AddPooledDbContextFactory`.
+  - **Key insight:** `AddDbContextPool` / `AddPooledDbContextFactory` recycle instances. Constructors run once per pool slot. Tenant values set in the constructor become stale. The safe pattern is a mutable field set after retrieval from the pool.
+  - Results identical on EF Core 8 and 10.
+- **`Find`/`FindAsync` vs query filters** *(Verified via spike, EF Core 8.0.32 + 10.0.12, SQLite — 2026-10-22)*:
+  - **Find for own tenant's entity (not tracked):** Returns the entity. Query filter applies. **Safe.**
+  - **Find for other tenant's entity (not tracked):** Returns `null`. Query filter prevents loading. **Safe.**
+  - **Find for other tenant's entity (already tracked via `Entry().State = Unchanged`):** **RETURNS THE CROSS-TENANT ENTITY.** Find checks the change tracker first; if the entity is tracked, it returns it without applying the query filter. **Cross-tenant data leak confirmed.**
+  - **Find after `IgnoreQueryFilters()` loads cross-tenant entity:** Same result — Find returns the tracked cross-tenant entity. **Cross-tenant data leak confirmed.**
+  - **Regular LINQ (`ToList()`) after tracking cross-tenant entity:** Query filter still applies to the database query. Tracked cross-tenant entities are NOT included in LINQ results. **Safe.**
+  - **Key insight:** `Find`/`FindAsync` is a two-step operation: (1) check change tracker, (2) query database. Step 1 does NOT apply query filters. This is by design (documented behavior) but is a tenant isolation hazard when cross-tenant entities enter the change tracker via `IgnoreQueryFilters()`, raw SQL, or manual `Attach`/`Entry` calls.
+  - Results identical on EF Core 8 and 10.
 
 ## 5. Engineering rules
 

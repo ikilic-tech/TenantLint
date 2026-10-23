@@ -88,6 +88,15 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL005.md");
 
+    public static readonly DiagnosticDescriptor TL012 = new(
+        id: "TL012",
+        title: "HasQueryFilter references a value not rooted in the DbContext instance",
+        messageFormat: "HasQueryFilter on '{0}' in '{1}' references a value not rooted in the DbContext instance. EF Core caches the model — the first value is baked in and reused for every tenant. Use a DbContext instance field instead.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL012.md");
+
     public static readonly DiagnosticDescriptor TL900 = new(
         id: "TL900",
         title: "Dynamic query filter detected",

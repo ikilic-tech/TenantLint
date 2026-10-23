@@ -3,25 +3,43 @@ using Microsoft.CodeAnalysis;
 
 namespace TenantLint.Analyzers;
 
+internal sealed class DeferredDiagnostic
+{
+    public DiagnosticDescriptor Descriptor { get; }
+    public Location Location { get; }
+    public object[] Args { get; }
+
+    public DeferredDiagnostic(DiagnosticDescriptor descriptor, Location location, params object[] args)
+    {
+        Descriptor = descriptor;
+        Location = location;
+        Args = args;
+    }
+}
+
 internal sealed class TenantModel
 {
     public static readonly TenantModel Empty = new(
         ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo>.Empty,
         ImmutableHashSet<INamedTypeSymbol>.Empty,
+        ImmutableArray<DeferredDiagnostic>.Empty,
         hasEfCore: false);
 
     public ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo> TenantEntities { get; }
     public ImmutableHashSet<INamedTypeSymbol> DynamicFilterContexts { get; }
     public ImmutableDictionary<string, TenantEntityInfo> TableNameToEntity { get; }
+    public ImmutableArray<DeferredDiagnostic> DeferredDiagnostics { get; }
     public bool HasEfCore { get; }
 
     public TenantModel(
         ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo> tenantEntities,
         ImmutableHashSet<INamedTypeSymbol> dynamicFilterContexts,
+        ImmutableArray<DeferredDiagnostic> deferredDiagnostics,
         bool hasEfCore)
     {
         TenantEntities = tenantEntities;
         DynamicFilterContexts = dynamicFilterContexts;
+        DeferredDiagnostics = deferredDiagnostics;
         HasEfCore = hasEfCore;
 
         var tableBuilder = ImmutableDictionary.CreateBuilder<string, TenantEntityInfo>(
