@@ -15,19 +15,25 @@ internal sealed class ConfigOptions
     public ImmutableHashSet<string> GlobalEntities { get; }
     public string? TenantFilterName { get; }
     public string CrossTenantAttribute { get; }
+    public ImmutableHashSet<string> FilteredBaseTypes { get; }
+    public ImmutableHashSet<string> TenantMarkerInterfaces { get; }
 
     private ConfigOptions(
         ImmutableHashSet<string> tenantPropertyNames,
         ImmutableHashSet<string> tenantColumnNames,
         ImmutableHashSet<string> globalEntities,
         string? tenantFilterName,
-        string crossTenantAttribute)
+        string crossTenantAttribute,
+        ImmutableHashSet<string> filteredBaseTypes,
+        ImmutableHashSet<string> tenantMarkerInterfaces)
     {
         TenantPropertyNames = tenantPropertyNames;
         TenantColumnNames = tenantColumnNames;
         GlobalEntities = globalEntities;
         TenantFilterName = tenantFilterName;
         CrossTenantAttribute = crossTenantAttribute;
+        FilteredBaseTypes = filteredBaseTypes;
+        TenantMarkerInterfaces = tenantMarkerInterfaces;
     }
 
     public static ConfigOptions Create(
@@ -70,12 +76,26 @@ internal sealed class ConfigOptions
         var crossTenantAttribute = ParseStringOption(options, "tenantlint.cross_tenant_attribute")
                                    ?? "CrossTenant";
 
+        var filteredBaseTypes = ParseCsvOption(
+            options,
+            "tenantlint.filtered_base_types",
+            ImmutableHashSet<string>.Empty,
+            StringComparer.OrdinalIgnoreCase);
+
+        var tenantMarkerInterfaces = ParseCsvOption(
+            options,
+            "tenantlint.tenant_marker_interfaces",
+            ImmutableHashSet<string>.Empty,
+            StringComparer.OrdinalIgnoreCase);
+
         return new ConfigOptions(
             tenantPropertyNames,
             tenantColumnNames,
             globalEntities,
             tenantFilterName,
-            crossTenantAttribute);
+            crossTenantAttribute,
+            filteredBaseTypes,
+            tenantMarkerInterfaces);
     }
 
     internal static ConfigOptions CreateDefault()
@@ -85,7 +105,9 @@ internal sealed class ConfigOptions
             DeriveColumnNames(DefaultTenantPropertyNames),
             ImmutableHashSet<string>.Empty,
             tenantFilterName: null,
-            crossTenantAttribute: "CrossTenant");
+            crossTenantAttribute: "CrossTenant",
+            filteredBaseTypes: ImmutableHashSet<string>.Empty,
+            tenantMarkerInterfaces: ImmutableHashSet<string>.Empty);
     }
 
     internal static ConfigOptions CreateWithPropertyNames(params string[] propertyNames)
@@ -96,7 +118,9 @@ internal sealed class ConfigOptions
             DeriveColumnNames(names),
             ImmutableHashSet<string>.Empty,
             tenantFilterName: null,
-            crossTenantAttribute: "CrossTenant");
+            crossTenantAttribute: "CrossTenant",
+            filteredBaseTypes: ImmutableHashSet<string>.Empty,
+            tenantMarkerInterfaces: ImmutableHashSet<string>.Empty);
     }
 
     internal static ConfigOptions CreateWithGlobalEntities(params string[] globalEntities)
@@ -106,7 +130,9 @@ internal sealed class ConfigOptions
             DeriveColumnNames(DefaultTenantPropertyNames),
             ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, globalEntities),
             tenantFilterName: null,
-            crossTenantAttribute: "CrossTenant");
+            crossTenantAttribute: "CrossTenant",
+            filteredBaseTypes: ImmutableHashSet<string>.Empty,
+            tenantMarkerInterfaces: ImmutableHashSet<string>.Empty);
     }
 
     internal static ImmutableHashSet<string> DeriveColumnNames(ImmutableHashSet<string> propertyNames)

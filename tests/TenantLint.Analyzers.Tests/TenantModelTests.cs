@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -894,5 +895,102 @@ public class AppDbContext : DbContext
         var model = await BuildModelAsync(source);
         Assert.Equal(FilterState.Unknown, model.GetFilterState(
             model.TenantEntities.Keys.First()));
+    }
+
+    // ===== CONFIG OPTIONS: filtered_base_types and tenant_marker_interfaces =====
+
+    [Fact]
+    public void FilteredBaseTypes_DefaultEmpty()
+    {
+        var options = ConfigOptions.CreateDefault();
+        Assert.Empty(options.FilteredBaseTypes);
+    }
+
+    [Fact]
+    public void FilteredBaseTypes_ParsesCsv()
+    {
+        var editorconfig = @"
+is_global = true
+tenantlint.filtered_base_types = Base1, Base2
+";
+        var options = ParseConfigFromEditorconfig(editorconfig);
+        Assert.Contains("Base1", options.FilteredBaseTypes);
+        Assert.Contains("Base2", options.FilteredBaseTypes);
+        Assert.Equal(2, options.FilteredBaseTypes.Count);
+    }
+
+    [Fact]
+    public void TenantMarkerInterfaces_DefaultEmpty()
+    {
+        var options = ConfigOptions.CreateDefault();
+        Assert.Empty(options.TenantMarkerInterfaces);
+    }
+
+    [Fact]
+    public void TenantMarkerInterfaces_ParsesCsv()
+    {
+        var editorconfig = @"
+is_global = true
+tenantlint.tenant_marker_interfaces = ITenantEntity, IMustHaveTenant
+";
+        var options = ParseConfigFromEditorconfig(editorconfig);
+        Assert.Contains("ITenantEntity", options.TenantMarkerInterfaces);
+        Assert.Contains("IMustHaveTenant", options.TenantMarkerInterfaces);
+        Assert.Equal(2, options.TenantMarkerInterfaces.Count);
+    }
+
+    private static ConfigOptions ParseConfigFromEditorconfig(string editorconfigContent)
+    {
+        var tree = CSharpSyntaxTree.ParseText("");
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { tree },
+            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var provider = new TestAnalyzerConfigOptionsProvider(editorconfigContent);
+        return ConfigOptions.Create(provider, compilation);
+    }
+
+    private sealed class TestAnalyzerConfigOptionsProvider : AnalyzerConfigOptionsProvider
+    {
+        private readonly TestAnalyzerConfigOptions _options;
+
+        public TestAnalyzerConfigOptionsProvider(string editorconfigContent)
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in editorconfigContent.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#") ||
+                    trimmed.StartsWith("[") || trimmed.StartsWith("is_global"))
+                    continue;
+                var eqIdx = trimmed.IndexOf('=');
+                if (eqIdx <= 0) continue;
+                var key = trimmed.Substring(0, eqIdx).Trim();
+                var value = trimmed.Substring(eqIdx + 1).Trim();
+                dict[key] = value;
+            }
+            _options = new TestAnalyzerConfigOptions(dict);
+        }
+
+        public override AnalyzerConfigOptions GlobalOptions => _options;
+
+        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => _options;
+
+        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => _options;
+    }
+
+    private sealed class TestAnalyzerConfigOptions : AnalyzerConfigOptions
+    {
+        private readonly Dictionary<string, string> _values;
+
+        public TestAnalyzerConfigOptions(Dictionary<string, string> values) => _values = values;
+
+        public override bool TryGetValue(string key, out string? value)
+        {
+            var found = _values.TryGetValue(key, out var result);
+            value = result;
+            return found;
+        }
     }
 }
