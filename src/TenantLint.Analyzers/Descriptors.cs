@@ -88,6 +88,15 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL005.md");
 
+    public static readonly DiagnosticDescriptor TL010 = new(
+        id: "TL010",
+        title: "Tenant-scoped entity bound from request body",
+        messageFormat: "'{0}' is a tenant-scoped entity bound from the request body; a client can set {1}. Bind a DTO and set {1} from the authenticated tenant.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL010.md");
+
     public static readonly DiagnosticDescriptor TL011 = new(
         id: "TL011",
         title: "Pooled DbContext has tenant filter on constructor-only field",

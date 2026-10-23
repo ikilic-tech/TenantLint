@@ -32,6 +32,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL103,
             Descriptors.TL005,
             Descriptors.TL105,
+            Descriptors.TL010,
             Descriptors.TL011,
             Descriptors.TL111,
             Descriptors.TL012,
@@ -119,6 +120,16 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             compilationStartContext.RegisterSymbolAction(
                 symbolContext => AnalyzeNamedTypeSymbol(symbolContext, options),
                 SymbolKind.NamedType);
+
+            // TL010: Detect tenant-scoped entity bound from request body
+            var aspNetTypes = AspNetCoreTypes.Resolve(compilation);
+            if (aspNetTypes.HasAny)
+            {
+                compilationStartContext.RegisterSymbolAction(
+                    symbolContext => AnalyzeActionParameterBinding(
+                        symbolContext, model, options, aspNetTypes),
+                    SymbolKind.Method);
+            }
 
             // TL005/TL105: Report unfiltered tenant entities via SymbolAction (local diagnostic)
             // Build a lookup of DbSet properties that need TL005/TL105 reporting
@@ -799,6 +810,112 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         return PlaceholderReasons.Contains(reason.Trim());
     }
 
+    private static void AnalyzeActionParameterBinding(
+        SymbolAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        AspNetCoreTypes aspNetTypes)
+    {
+        var method = (IMethodSymbol)context.Symbol;
+
+        // Check [CrossTenant] exemption on method or containing type
+        if (HasCrossTenantAttribute(method, options.CrossTenantAttribute))
+            return;
+        if (method.ContainingType is not null &&
+            HasCrossTenantAttribute(method.ContainingType, options.CrossTenantAttribute))
+            return;
+
+        // Determine if the containing type is an [ApiController]
+        var isApiController = aspNetTypes.ApiController is not null &&
+                              method.ContainingType is not null &&
+                              HasAttribute(method.ContainingType, aspNetTypes.ApiController);
+
+        foreach (var param in method.Parameters)
+        {
+            var paramType = param.Type as INamedTypeSymbol;
+            if (paramType is null)
+                continue;
+
+            // Check if the parameter type is tenant-scoped
+            if (!model.IsTenantScoped(paramType))
+                continue;
+
+            // Get tenant property name for the message
+            var tenantPropertyName = model.TenantEntities.TryGetValue(paramType, out var info)
+                ? info.TenantPropertyName
+                : options.TenantPropertyNames.FirstOrDefault() ?? "TenantId";
+
+            // Check for explicit [FromBody] or [FromForm]
+            if (HasAttribute(param, aspNetTypes.FromBody) ||
+                HasAttribute(param, aspNetTypes.FromForm))
+            {
+                ReportTL010(context, param, paramType, tenantPropertyName);
+                continue;
+            }
+
+            // Check for implicit body binding on [ApiController]
+            if (isApiController && IsImplicitlyBodyBound(param, aspNetTypes))
+            {
+                ReportTL010(context, param, paramType, tenantPropertyName);
+            }
+        }
+    }
+
+    private static void ReportTL010(
+        SymbolAnalysisContext context,
+        IParameterSymbol param,
+        INamedTypeSymbol paramType,
+        string tenantPropertyName)
+    {
+        var location = param.Locations.FirstOrDefault() ?? Location.None;
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL010,
+            location,
+            paramType.Name,
+            tenantPropertyName));
+    }
+
+    private static bool IsImplicitlyBodyBound(IParameterSymbol param, AspNetCoreTypes aspNetTypes)
+    {
+        // If the parameter has any explicit binding attribute, it's not implicitly body-bound
+        if (HasAttribute(param, aspNetTypes.FromServices) ||
+            HasAttribute(param, aspNetTypes.FromRoute) ||
+            HasAttribute(param, aspNetTypes.FromQuery) ||
+            HasAttribute(param, aspNetTypes.FromHeader) ||
+            HasAttribute(param, aspNetTypes.FromBody) ||
+            HasAttribute(param, aspNetTypes.FromForm))
+            return false;
+
+        // Primitives, strings, and CancellationToken are not implicitly body-bound
+        var type = param.Type;
+        if (type.SpecialType != SpecialType.None)
+            return false;
+
+        if (type.Name == "String" || type.Name == "CancellationToken")
+            return false;
+
+        if (type.TypeKind == TypeKind.Enum)
+            return false;
+
+        // Complex types without explicit binding are implicitly body-bound on [ApiController]
+        return true;
+    }
+
+    private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attributeType)
+    {
+        if (attributeType is null)
+            return false;
+
+        foreach (var attr in symbol.GetAttributes())
+        {
+            if (attr.AttributeClass is not null &&
+                attr.AttributeClass.Equals(attributeType, SymbolEqualityComparer.Default))
+                return true;
+        }
+
+        return false;
+    }
+
     private static bool HasCrossTenantAttributeInCompilation(
         Compilation compilation, string crossTenantAttributeName)
     {
@@ -816,5 +933,49 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         }
 
         return false;
+    }
+}
+
+internal sealed class AspNetCoreTypes
+{
+    public INamedTypeSymbol? FromBody { get; }
+    public INamedTypeSymbol? FromForm { get; }
+    public INamedTypeSymbol? ApiController { get; }
+    public INamedTypeSymbol? FromServices { get; }
+    public INamedTypeSymbol? FromRoute { get; }
+    public INamedTypeSymbol? FromQuery { get; }
+    public INamedTypeSymbol? FromHeader { get; }
+
+    public bool HasAny =>
+        FromBody is not null || FromForm is not null || ApiController is not null;
+
+    private AspNetCoreTypes(
+        INamedTypeSymbol? fromBody,
+        INamedTypeSymbol? fromForm,
+        INamedTypeSymbol? apiController,
+        INamedTypeSymbol? fromServices,
+        INamedTypeSymbol? fromRoute,
+        INamedTypeSymbol? fromQuery,
+        INamedTypeSymbol? fromHeader)
+    {
+        FromBody = fromBody;
+        FromForm = fromForm;
+        ApiController = apiController;
+        FromServices = fromServices;
+        FromRoute = fromRoute;
+        FromQuery = fromQuery;
+        FromHeader = fromHeader;
+    }
+
+    public static AspNetCoreTypes Resolve(Compilation compilation)
+    {
+        return new AspNetCoreTypes(
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromBodyAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromFormAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ApiControllerAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromServicesAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromRouteAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute"));
     }
 }
