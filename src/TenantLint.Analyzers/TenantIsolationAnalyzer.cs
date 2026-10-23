@@ -1675,10 +1675,24 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             "IMultiTenantContextAccessor",
             "IHttpContextAccessor");
 
+    /// <summary>
+    /// Type name suffixes that indicate a tenant-context abstraction (not a DTO/value object).
+    /// Static readonly fields are only flagged if their type matches one of these.
+    /// </summary>
+    private static readonly string[] TenantContextSuffixes =
+    {
+        "TenantContext",
+        "CurrentTenant",
+        "TenantProvider",
+        "TenantAccessor",
+        "TenantInfo",
+    };
+
     private static void AnalyzeStaticTenantField(SymbolAnalysisContext context, ConfigOptions options)
     {
         var symbol = context.Symbol;
         bool isStatic;
+        bool isReadOnly;
         ITypeSymbol? fieldType;
         string fieldName;
 
@@ -1693,12 +1707,15 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                 return;
 
             isStatic = field.IsStatic;
+            isReadOnly = field.IsReadOnly;
             fieldType = field.Type;
             fieldName = field.Name;
         }
         else if (symbol is IPropertySymbol property)
         {
             isStatic = property.IsStatic;
+            // A static property is "readonly" if it has no setter, or the setter is init-only
+            isReadOnly = property.SetMethod is null || property.SetMethod.IsInitOnly;
             fieldType = property.Type;
             fieldName = property.Name;
         }
@@ -1745,6 +1762,40 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
 
         if (!isTenantRelated)
             return;
+
+        // Static readonly fields: only report if the type is a tenant-context
+        // abstraction (not a DTO, options, settings, theme, or value object).
+        if (isReadOnly)
+        {
+            var isTenantContextType = false;
+
+            // Check if the field name matches a configured tenant property name
+            // (e.g. "TenantId", "OrganizationId") — always dangerous even if readonly
+            foreach (var propName in options.TenantPropertyNames)
+            {
+                if (fieldName.Equals(propName, StringComparison.OrdinalIgnoreCase))
+                {
+                    isTenantContextType = true;
+                    break;
+                }
+            }
+
+            // Check if the type name ends with a known tenant-context suffix
+            if (!isTenantContextType)
+            {
+                foreach (var suffix in TenantContextSuffixes)
+                {
+                    if (typeName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isTenantContextType = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isTenantContextType)
+                return;
+        }
 
         var location = symbol.Locations.FirstOrDefault() ?? Location.None;
         context.ReportDiagnostic(Diagnostic.Create(

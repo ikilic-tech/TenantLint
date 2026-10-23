@@ -152,4 +152,222 @@ class Constants
 ";
         await Verify.VerifyAnalyzerAsync(source);
     }
+
+    // ===========================================================
+    // Static readonly narrowing: DTOs/value objects are safe
+    // ===========================================================
+
+    [Fact]
+    public async Task StaticReadonly_TenantThemeDto_Default_NoReport()
+    {
+        var source = @"
+class TenantThemeDto
+{
+    public string PrimaryColor { get; set; }
+    public static readonly TenantThemeDto Default = new TenantThemeDto();
+}
+";
+        var test = CreateTL007Test(source);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantSettings_Default_NoReport()
+    {
+        var source = @"
+class TenantSettings
+{
+    public int MaxUsers { get; set; }
+    public static readonly TenantSettings Default = new TenantSettings();
+}
+";
+        var test = CreateTL007Test(source);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantOptions_NoReport()
+    {
+        var source = @"
+class TenantOptions
+{
+    public string ConnectionString { get; set; }
+    public static readonly TenantOptions Default = new TenantOptions();
+}
+";
+        var test = CreateTL007Test(source);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticGetOnly_TenantConfig_NoReport()
+    {
+        var source = @"
+class TenantConfig
+{
+    public static TenantConfig Default { get; } = new TenantConfig();
+}
+";
+        var test = CreateTL007Test(source);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    // ===========================================================
+    // Static readonly: tenant-context types SHOULD still report
+    // ===========================================================
+
+    [Fact]
+    public async Task StaticProperty_TenantContext_GetSet_Reports()
+    {
+        var source = @"
+class TenantContext
+{
+    public string TenantId { get; set; }
+}
+
+class State
+{
+    public static TenantContext {|#0:Current|} { get; set; }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Current");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantContext_Instance_Reports()
+    {
+        var source = @"
+class TenantContext
+{
+    public string TenantId { get; set; }
+}
+
+class State
+{
+    public static readonly TenantContext {|#0:Instance|} = new TenantContext();
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Instance");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_CurrentTenant_Reports()
+    {
+        var source = @"
+class CurrentTenant
+{
+    public string Id { get; set; }
+}
+
+class State
+{
+    public static readonly CurrentTenant {|#0:Instance|} = new CurrentTenant();
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Instance");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantProvider_Reports()
+    {
+        var source = @"
+class TenantProvider
+{
+    public string GetTenantId() => """";
+}
+
+class State
+{
+    public static readonly TenantProvider {|#0:Provider|} = new TenantProvider();
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Provider");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantAccessor_Reports()
+    {
+        var source = @"
+class TenantAccessor
+{
+    public string TenantId { get; set; }
+}
+
+class State
+{
+    public static readonly TenantAccessor {|#0:Accessor|} = new TenantAccessor();
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Accessor");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticReadonly_TenantInfo_Reports()
+    {
+        var source = @"
+class TenantInfo
+{
+    public string TenantId { get; set; }
+}
+
+class State
+{
+    public static readonly TenantInfo {|#0:Info|} = new TenantInfo();
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Info");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StaticNonReadonly_TenantThemeDto_StillReports()
+    {
+        // Non-readonly static fields are always reported (mutable state)
+        var source = @"
+class TenantThemeDto
+{
+    public string PrimaryColor { get; set; }
+}
+
+class State
+{
+    public static TenantThemeDto {|#0:Current|};
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(0)
+            .WithArguments("Current");
+
+        var test = CreateTL007Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
+    }
 }

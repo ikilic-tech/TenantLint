@@ -561,25 +561,24 @@ threshold.
 Selective `IgnoreQueryFilters([QueryFilterNames.Tenant])` at lines 152, 175, 196
 correctly NOT flagged.
 
-#### 2. fullstackhero / Finbuckle — 9 diagnostics (8 TP, 1 FP)
+#### 2. fullstackhero / Finbuckle — 8 diagnostics (8 TP, 0 FP)
 
 | # | Rule | File | Entity/Field | Verdict |
 |---|------|------|-------------|---------|
-| 1 | TL007 | `TenantThemeDto.cs:22` | `Default` (static) | **FP** — immutable fallback DTO, not mutable tenant state |
-| 2 | TL005 | `BillingDbContext.cs:19` | `Subscription` | **TP** — has `TenantId`, no query filter |
-| 3 | TL005 | `BillingDbContext.cs:20` | `Invoice` | **TP** — has `TenantId`, no query filter |
-| 4 | TL005 | `BillingDbContext.cs:22` | `UsageSnapshot` | **TP** — has `TenantId`, no query filter |
-| 5 | TL005 | `BillingDbContext.cs:23` | `Wallet` | **TP** — has `TenantId`, no query filter |
-| 6 | TL005 | `BillingDbContext.cs:24` | `WalletTransaction` | **TP** — has `TenantId`, no query filter |
-| 7 | TL005 | `BillingDbContext.cs:25` | `TopupRequest` | **TP** — has `TenantId`, no query filter |
-| 8 | TL001 | `GetAuditSummaryQueryHandler.cs:112` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
-| 9 | TL001 | `GetAuditsQueryHandler.cs:165` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 1 | TL005 | `BillingDbContext.cs:19` | `Subscription` | **TP** — has `TenantId`, no query filter |
+| 2 | TL005 | `BillingDbContext.cs:20` | `Invoice` | **TP** — has `TenantId`, no query filter |
+| 3 | TL005 | `BillingDbContext.cs:22` | `UsageSnapshot` | **TP** — has `TenantId`, no query filter |
+| 4 | TL005 | `BillingDbContext.cs:23` | `Wallet` | **TP** — has `TenantId`, no query filter |
+| 5 | TL005 | `BillingDbContext.cs:24` | `WalletTransaction` | **TP** — has `TenantId`, no query filter |
+| 6 | TL005 | `BillingDbContext.cs:25` | `TopupRequest` | **TP** — has `TenantId`, no query filter |
+| 7 | TL001 | `GetAuditSummaryQueryHandler.cs:112` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 8 | TL001 | `GetAuditsQueryHandler.cs:165` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
 
-**TL007 FP analysis:** `TenantThemeDto.Default` is a `static readonly` field holding an
-immutable fallback value. TL007's heuristic flags static fields whose containing type
-name contains "Tenant". `TenantThemeDto` matches because of "Tenant" in the class name,
-but the field holds a DTO default value, not mutable per-request tenant state. This is
-a known limitation of the name-based heuristic.
+**TL007 FP eliminated (preview.3):** `TenantThemeDto.Default` was a false positive in
+previous rounds — a `static readonly` field holding an immutable fallback DTO. The TL007
+heuristic now only reports static readonly fields when the type is a tenant-context
+abstraction (type name ends with TenantContext, CurrentTenant, TenantProvider,
+TenantAccessor, TenantInfo). DTOs, options, settings, and themes are no longer flagged.
 
 **Missed:** ~8 parameterless `IgnoreQueryFilters()` calls on Identity/Chat/Files module
 entities. These entities are configured with Finbuckle `IsMultiTenant()` via
@@ -624,8 +623,8 @@ Finbuckle `IsMultiTenant()` recognition works correctly. All entities are
 
 | Category | Count | Percentage |
 |----------|-------|-----------|
-| True positive | 14 | 93.3% |
-| False positive | 1 | 6.7% |
+| True positive | 14 | 100% |
+| False positive | 0 | 0% |
 
 ### Evolution across rounds
 
@@ -634,19 +633,17 @@ Finbuckle `IsMultiTenant()` recognition works correctly. All entities are
 | 1 | preview.2 | 3 | 18 | 8 | 10 | 56% |
 | 2 | preview.3 (P0/P1 fixes) | 3 | 11 | 11 | 0 | 0% |
 | 3 initial | preview.3 | 3 (held-out) | 5 | 2 | 3 | 60% |
-| **3 final** | **preview.4 (all rules)** | **6** | **15** | **14** | **1** | **6.7%** |
+| 3 final | preview.4 (all rules) | 6 | 15 | 14 | 1 | 6.7% |
+| **3 re-run** | **preview.5 (TL007 fix)** | **6** | **14** | **14** | **0** | **0%** |
 
-### The one false positive
+### False positives eliminated
 
-**TL007 on `TenantThemeDto.Default`:** A `static readonly TenantThemeDto` field in
-fullstackhero. TL007 flags static fields whose containing type name contains "Tenant"
-as potential shared tenant state. The heuristic is too broad: `TenantThemeDto` is a
-DTO (Data Transfer Object) with a default fallback value, not mutable per-request state.
-
-**Possible improvements (not implemented):**
-- Exclude `readonly` static fields whose type is a DTO/record/immutable value
-- Require the *field* type (not containing type) to match tenant patterns
-- Allow a `tenantlint.tl007_exclude_types` config option
+**TL007 on `TenantThemeDto.Default` (fixed in preview.3):** Previously a false positive.
+The TL007 heuristic was narrowed to only report static `readonly` fields when the type
+is a tenant-context abstraction (type name ends with TenantContext, CurrentTenant,
+TenantProvider, TenantAccessor, TenantInfo). DTOs, options, settings, and themes are
+no longer flagged. The fullstackhero `TenantThemeDto.Default` field is now correctly
+excluded (1 fewer diagnostic, 0 FP).
 
 ### Security disclosure
 
