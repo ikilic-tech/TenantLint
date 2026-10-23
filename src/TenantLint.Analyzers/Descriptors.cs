@@ -7,15 +7,6 @@ internal static class Descriptors
     private const string Category = "TenantIsolation";
     private const string HelpLinkBase = "https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/";
 
-    public static readonly DiagnosticDescriptor TL000 = new(
-        id: "TL000",
-        title: "TenantLint placeholder",
-        messageFormat: "TenantLint is loaded",
-        category: Category,
-        defaultSeverity: DiagnosticSeverity.Hidden,
-        isEnabledByDefault: false,
-        helpLinkUri: HelpLinkBase + "TL000.md");
-
     public static readonly DiagnosticDescriptor TL001 = new(
         id: "TL001",
         title: "IgnoreQueryFilters() removes tenant filter",

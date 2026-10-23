@@ -25,7 +25,6 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
         ImmutableArray.Create(
-            Descriptors.TL000,
             Descriptors.TL001,
             Descriptors.TL001NoSelective,
             Descriptors.TL002,
@@ -1532,7 +1531,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
     // and anti-tamper meta-rules (TL201–TL203) to avoid self-referential loops.
     private static readonly ImmutableHashSet<string> TL203IgnoredIds =
         ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
-            "TL000", "TL111", "TL201", "TL202", "TL203");
+            "TL111", "TL201", "TL202", "TL203");
 
     // ---------------------------------------------------------------
     // TL014: ABP tenant-filter bypass
