@@ -238,7 +238,8 @@ A .NET 10 minimal API app (`Microsoft.NET.Sdk.Web`) + EF Core 10 (SQLite) multi-
 - Matrix: ubuntu-latest, windows-latest; .NET 8 + 10 SDKs.
 - `dotnet build -warnaserror` (src), `dotnet test`, `dotnet pack`.
 - Build the sample (from `samples/SampleSaaS/` working directory so `samples/global.json` is used) and assert all 16 demonstrated rule IDs appear in build output.
-- On tag `v*`: pack and publish to NuGet via **NuGet Trusted Publishing** (`NuGet/login@v1` with `secrets.NUGET_USER`, short-lived OIDC key). No long-lived `NUGET_API_KEY` secret. Create a GitHub Release with notes from CHANGELOG.
+- On tag `v*`: pack and publish to NuGet via **NuGet Trusted Publishing** (`NuGet/login@v1` with `secrets.NUGET_USER`, short-lived OIDC key). No long-lived `NUGET_API_KEY` secret. Create a GitHub Release with notes from CHANGELOG; mark `-preview` tags as prerelease.
+- **Versioning:** The package version is derived from the git tag in the release workflow (`-p:Version=${GITHUB_REF_NAME#v}`). A validation step fails the build if the tag is not valid SemVer. The csproj `<Version>` is kept as a default for local `dotnet pack` builds but is overridden by CI on tagged releases.
 
 ## 8. Milestones (work in this order; stop after each for maintainer review)
 
