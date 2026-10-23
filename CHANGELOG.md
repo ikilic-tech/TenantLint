@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **TL012**: false positive on primary constructor parameters (`class AppDb(int tenantId) : DbContext`). The compiler captures primary-ctor parameters into instance fields; EF Core parameterizes them correctly per instance. `IsValueRootedInInstance` now recognizes `IParameterSymbol` for constructor parameters.
+
 ## [0.1.0-preview.3] - 2026-10-24
 
 ### Rules

@@ -347,6 +347,120 @@ public class AppDbContext : DbContext
     }
 
     // ===========================================================
+    // Negative — primary constructor parameters (no TL012)
+    // The compiler captures primary-ctor params into instance
+    // fields; EF Core parameterizes them per instance.
+    // ===========================================================
+
+    [Fact]
+    public async Task PrimaryCtorParam_Int_NoDiagnostic()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public int TenantId { get; set; }
+}
+
+public class AppDbContext(int tenantId) : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().HasQueryFilter(e => e.TenantId == tenantId);
+    }
+}
+";
+        // Primary ctor parameter is rooted in this — no TL012. TL111 is disabled by default.
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task PrimaryCtorParam_Guid_NoDiagnostic()
+    {
+        var source = @"
+using System;
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public Guid TenantId { get; set; }
+}
+
+public class AppDbContext(Guid tenantId) : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().HasQueryFilter(e => e.TenantId == tenantId);
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task PrimaryCtorParam_String_NoDiagnostic()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext(string tenantId) : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().HasQueryFilter(e => e.TenantId == tenantId);
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task PrimaryCtorParam_ServiceProperty_NoDiagnostic()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public interface ITenantProvider
+{
+    string TenantId { get; }
+}
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext(ITenantProvider tenantProvider) : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().HasQueryFilter(e => e.TenantId == tenantProvider.TenantId);
+    }
+}
+";
+        // Service accessed via primary ctor param — rooted in this. TL111 is disabled by default.
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    // ===========================================================
     // Non-comparison forms (Contains, etc.)
     // ===========================================================
 

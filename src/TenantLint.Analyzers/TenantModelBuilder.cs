@@ -922,6 +922,16 @@ internal sealed class TenantModelBuilder
             IsContainedInType(property.ContainingType, contextType))
             return true;
 
+        // Primary constructor parameters are captured by the compiler into
+        // instance fields. EF Core sees the generated this.<field> access and
+        // parameterizes the filter correctly per instance.
+        if (symbol is IParameterSymbol parameter &&
+            parameter.ContainingSymbol is IMethodSymbol method &&
+            method.MethodKind == MethodKind.Constructor &&
+            method.ContainingType is INamedTypeSymbol paramOwner &&
+            IsContainedInType(paramOwner, contextType))
+            return true;
+
         return false;
     }
 
