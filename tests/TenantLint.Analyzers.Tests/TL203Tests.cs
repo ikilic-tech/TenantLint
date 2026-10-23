@@ -22,6 +22,7 @@ public class TL203Tests
         var test = new CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier>
         {
             TestCode = source,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
 
@@ -154,6 +155,7 @@ dotnet_diagnostic.TL001.severity = suggestion
         var test = new CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier>
         {
             TestCode = source,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.TestState.AnalyzerConfigFiles.Add(("/.editorconfig", editorconfig));
         test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);

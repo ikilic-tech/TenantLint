@@ -11,14 +11,10 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
     where TAnalyzer : DiagnosticAnalyzer, new()
 {
     // Diagnostics that are disabled by default (isEnabledByDefault: false).
-    // The Roslyn test framework does not automatically suppress these,
-    // so we exclude them in helpers that don't provide an .editorconfig.
-    // Tests that need these diagnostics should use the *AndOptions* helpers
-    // with an .editorconfig that explicitly enables them.
-    // Diagnostics suppressed in test helpers to avoid interference:
-    // TL111: disabled by default (opt-in only)
-    // TL201: fires on auto-inserted #pragma warning disable in test framework
-    internal static readonly string[] DisabledByDefaultIds = { "TL111", "TL201" };
+    // Only TL111 is opt-in; all other diagnostics (including TL201-TL203)
+    // are enabled by default. Tests that need TL111 should use the
+    // *AndOptions* helpers with an .editorconfig that explicitly enables it.
+    internal static readonly string[] DisabledByDefaultIds = { "TL111" };
 
     public static readonly ReferenceAssemblies Net80WithEfCore =
         ReferenceAssemblies.Net.Net80.AddPackages(
@@ -53,6 +49,9 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         var test = new CSharpAnalyzerTest<TAnalyzer, DefaultVerifier>
         {
             TestCode = source,
+            // Skip suppression check: the framework auto-inserts #pragma warning disable TLxxx
+            // which triggers TL201 (pragma without justification). TL201 tests verify this directly.
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -65,6 +64,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCore,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -77,6 +77,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -89,6 +90,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCoreAndDapper,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -101,6 +103,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10AndDapper,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -116,6 +119,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCore,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.TestState.AnalyzerConfigFiles.Add(
@@ -133,6 +137,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.TestState.AnalyzerConfigFiles.Add(
@@ -168,6 +173,7 @@ public static class CSharpCodeFixVerifier<TAnalyzer, TCodeFix>
             ReferenceAssemblies = referenceAssemblies ?? CSharpAnalyzerVerifier<TAnalyzer>.Net80WithEfCore,
             CodeActionIndex = codeActionIndex,
             CodeActionEquivalenceKey = equivalenceKey,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TAnalyzer>.DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
@@ -192,6 +198,7 @@ public static class CSharpCodeFixVerifier<TAnalyzer, TCodeFix>
             ReferenceAssemblies = referenceAssemblies ?? CSharpAnalyzerVerifier<TAnalyzer>.Net80WithEfCore,
             CodeActionIndex = codeActionIndex,
             CodeActionEquivalenceKey = equivalenceKey,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         test.TestState.AnalyzerConfigFiles.Add(
             ("/.editorconfig", editorconfigContent));

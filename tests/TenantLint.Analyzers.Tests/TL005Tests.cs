@@ -416,7 +416,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -477,7 +478,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -543,7 +545,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -626,7 +629,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -693,7 +697,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -761,7 +766,8 @@ public class AppDbContext : DbContext
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.Add(
             CodeFixVerify.Diagnostic(Descriptors.TL005)
                 .WithLocation(0)
@@ -832,7 +838,8 @@ tenantlint.tenant_filter_name = Isolation
             CodeFixTestBehaviors = CodeFixTestBehaviors.SkipFixAllCheck
                 | CodeFixTestBehaviors.SkipFixAllInDocumentCheck,
         };
-        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.DisabledByDefaultIds);
+        test.TestBehaviors = TestBehaviors.SkipSuppressionCheck;
+        test.DisabledDiagnostics.Add("TL111");
         test.TestState.AnalyzerConfigFiles.Add(("/.editorconfig", editorconfig));
         test.FixedState.AnalyzerConfigFiles.Add(("/.editorconfig", editorconfig));
         test.ExpectedDiagnostics.Add(

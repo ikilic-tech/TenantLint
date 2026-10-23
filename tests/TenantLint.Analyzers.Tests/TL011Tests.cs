@@ -16,7 +16,6 @@ dotnet_diagnostic.TL111.severity = suggestion
     /// <summary>
     /// Creates a test instance that enables TL111 via editorconfig without suppressing it
     /// via DisabledDiagnostics (which would override the editorconfig setting).
-    /// Only TL201 is suppressed to avoid interference from auto-inserted pragmas.
     /// </summary>
     private static CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier> CreateTL111Test(
         string source, params DiagnosticResult[] expected)
@@ -25,9 +24,8 @@ dotnet_diagnostic.TL111.severity = suggestion
         {
             TestCode = source,
             ReferenceAssemblies = CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.Net80WithEfCore,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
-        // Only suppress TL201, not TL111 — TL111 is being explicitly enabled via editorconfig
-        test.DisabledDiagnostics.Add("TL201");
         test.TestState.AnalyzerConfigFiles.Add(("/.editorconfig", EnableTL111));
         test.ExpectedDiagnostics.AddRange(expected);
         return test;

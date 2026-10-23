@@ -133,6 +133,8 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 | **TL202** | Warning | `[SuppressMessage]` targeting TL rules without a `Justification`. |
 | **TL203** | Warning | TL rules globally disabled via `<NoWarn>` or `.editorconfig` `severity = none`. |
 
+**Enabled-by-default policy:** TL201–TL203 are enabled by default (Warning). They are the core anti-tamper layer: an AI agent's easiest bypass is `#pragma warning disable TLxxx`, and a disabled-by-default TL201 provides no protection. Only TL111 is opt-in (`isEnabledByDefault: false`) because it fires on a pattern that is only unsafe if pooling is introduced later.
+
 ### Verification tasks (do not skip)
 - **FromSql\*** *(Verified — 2026-10-22)*: EF Core composes global query filters over composable `FromSql*` queries on a `DbSet<T>`. Confirmed via EF Core documentation and community sources for EF Core 8 and 10. `FromSqlRaw`/`FromSqlInterpolated` produce composable subqueries; EF Core wraps them and applies `WHERE` clauses from global filters. Non-composable SQL (stored procedures) cannot have filters applied. **Result:** `FromSql*` is excluded from TL002 scope — tenant filters protect these queries automatically.
 - **Named filters API** *(Verified against EF Core 10.0.0 — 2026-10-22)*:

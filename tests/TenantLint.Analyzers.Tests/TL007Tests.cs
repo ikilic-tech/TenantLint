@@ -19,10 +19,10 @@ public class TL007Tests
         var test = new CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier>
         {
             TestCode = source,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
-        // Only suppress TL111 and TL201, not TL007
+        // Only suppress TL111 (opt-in), not TL007
         test.DisabledDiagnostics.Add("TL111");
-        test.DisabledDiagnostics.Add("TL201");
         test.ExpectedDiagnostics.AddRange(expected);
         return test;
     }

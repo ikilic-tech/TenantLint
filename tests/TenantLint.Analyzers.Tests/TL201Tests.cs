@@ -18,10 +18,10 @@ public class TL201Tests
         var test = new CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier>
         {
             TestCode = source,
+            TestBehaviors = TestBehaviors.SkipSuppressionCheck,
         };
         // Only suppress TL111 (disabled-by-default), not TL201 — we need TL201 active
-        // since it's the rule under test. TL201 skips its own ID (#pragma disable TL201)
-        // to avoid self-referential detection.
+        // since it's the rule under test.
         test.DisabledDiagnostics.Add("TL111");
         test.ExpectedDiagnostics.AddRange(expected);
         return test;
