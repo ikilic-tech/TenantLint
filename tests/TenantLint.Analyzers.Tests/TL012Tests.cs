@@ -166,11 +166,8 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        // No TL012, but TL111 fires (readonly field)
-        var expected = Verify.Diagnostic(Descriptors.TL111)
-            .WithSpan(12, 29, 12, 38)
-            .WithArguments("AppDbContext", "_tenantId");
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        // No TL012 (instance field is rooted in this). TL111 is disabled by default.
+        await Verify.VerifyWithEfCoreAsync(source);
     }
 
     [Fact]
@@ -201,11 +198,8 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        // No TL012, but TL111 fires (readonly field)
-        var expected = Verify.Diagnostic(Descriptors.TL111)
-            .WithSpan(15, 37, 15, 51)
-            .WithArguments("AppDbContext", "_tenantService");
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        // No TL012 (property on instance field is rooted in this). TL111 is disabled by default.
+        await Verify.VerifyWithEfCoreAsync(source);
     }
 
     [Fact]
@@ -238,11 +232,8 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        // No TL012, but TL111 fires (readonly field)
-        var expected = Verify.Diagnostic(Descriptors.TL111)
-            .WithSpan(17, 37, 17, 46)
-            .WithArguments("AppDbContext", "_resolver");
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        // No TL012 (method call on instance field is rooted in this). TL111 is disabled by default.
+        await Verify.VerifyWithEfCoreAsync(source);
     }
 
     [Fact]
@@ -348,6 +339,115 @@ public class AppDbContext : DbContext
 }
 ";
         // Empty string is a constant — no TL012
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    // ===========================================================
+    // Non-comparison forms (Contains, etc.)
+    // ===========================================================
+
+    [Fact]
+    public async Task StaticListContains_InFilterLambda_ReportsTL012()
+    {
+        var source = @"
+using System.Collections.Generic;
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public static class TenantHelper
+{
+    public static List<string> AllowedTenants { get; set; } = new();
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().{|#0:HasQueryFilter|}(e => TenantHelper.AllowedTenants.Contains(e.TenantId));
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL012)
+            .WithLocation(0)
+            .WithArguments("Order", "AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task AsyncLocalStaticProperty_InFilterLambda_ReportsTL012()
+    {
+        var source = @"
+using System.Threading;
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public static class TenantContext
+{
+    private static readonly AsyncLocal<string> _current = new();
+    public static string Current
+    {
+        get => _current.Value ?? """";
+        set => _current.Value = value;
+    }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().{|#0:HasQueryFilter|}(e => e.TenantId == TenantContext.Current);
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL012)
+            .WithLocation(0)
+            .WithArguments("Order", "AppDbContext");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task InstanceListContains_InFilterLambda_NoDiagnostic()
+    {
+        var source = @"
+using System.Collections.Generic;
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    private List<string> _allowedTenants = new();
+    public DbSet<Order> Orders { get; set; }
+
+    public void SetAllowedTenants(List<string> tenants) { _allowedTenants = tenants; }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        m.Entity<Order>().HasQueryFilter(e => _allowedTenants.Contains(e.TenantId));
+    }
+}
+";
+        // Instance field rooted in this — no TL012. Mutable — no TL111.
         await Verify.VerifyWithEfCoreAsync(source);
     }
 }

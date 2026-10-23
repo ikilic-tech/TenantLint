@@ -10,6 +10,13 @@ namespace TenantLint.Analyzers.Tests;
 public static class CSharpAnalyzerVerifier<TAnalyzer>
     where TAnalyzer : DiagnosticAnalyzer, new()
 {
+    // Diagnostics that are disabled by default (isEnabledByDefault: false).
+    // The Roslyn test framework does not automatically suppress these,
+    // so we exclude them in helpers that don't provide an .editorconfig.
+    // Tests that need these diagnostics should use the *AndOptions* helpers
+    // with an .editorconfig that explicitly enables them.
+    internal static readonly string[] DisabledByDefaultIds = { "TL111" };
+
     public static readonly ReferenceAssemblies Net80WithEfCore =
         ReferenceAssemblies.Net.Net80.AddPackages(
             ImmutableArray.Create(
@@ -44,6 +51,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
         {
             TestCode = source,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);
     }
@@ -55,6 +63,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCore,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);
     }
@@ -66,6 +75,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);
     }
@@ -77,6 +87,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCoreAndDapper,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);
     }
@@ -88,6 +99,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10AndDapper,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         await test.RunAsync(CancellationToken.None);
     }
@@ -152,6 +164,7 @@ public static class CSharpCodeFixVerifier<TAnalyzer, TCodeFix>
             CodeActionIndex = codeActionIndex,
             CodeActionEquivalenceKey = equivalenceKey,
         };
+        test.DisabledDiagnostics.AddRange(CSharpAnalyzerVerifier<TAnalyzer>.DisabledByDefaultIds);
         test.ExpectedDiagnostics.AddRange(expected);
         if (remainingDiagnostics is not null)
             test.FixedState.ExpectedDiagnostics.AddRange(remainingDiagnostics);

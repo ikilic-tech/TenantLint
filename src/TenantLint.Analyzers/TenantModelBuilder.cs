@@ -510,6 +510,7 @@ internal sealed class TenantModelBuilder
         else
             return;
 
+        // 1. Binary expressions: e.TenantId == <value> or <value> == e.TenantId
         foreach (var binary in lambdaBody.DescendantNodesAndSelf().OfType<BinaryExpressionSyntax>())
         {
             if (!binary.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.EqualsExpression) &&
@@ -526,39 +527,80 @@ internal sealed class TenantModelBuilder
             if (valueSide is null)
                 continue;
 
-            // Skip constants and literals — they're intentional
-            var constant = semanticModel.GetConstantValue(valueSide);
-            if (constant.HasValue)
+            if (CheckValueSide(valueSide, invocation, semanticModel, entityType, contextType))
+                return;
+        }
+
+        // 2. Invocations where a tenant property is an argument:
+        //    e.g., StaticList.Contains(e.TenantId) or _tenantIds.Contains(e.TenantId)
+        foreach (var invocationNode in lambdaBody.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
+        {
+            bool hasTenantPropertyArg = false;
+            foreach (var arg in invocationNode.ArgumentList.Arguments)
+            {
+                if (IsEntityTenantPropertyAccess(arg.Expression, semanticModel))
+                {
+                    hasTenantPropertyArg = true;
+                    break;
+                }
+            }
+
+            if (!hasTenantPropertyArg)
                 continue;
 
-            if (!IsValueRootedInInstance(valueSide, semanticModel, contextType))
+            // The receiver of the invocation is the "value side"
+            if (invocationNode.Expression is MemberAccessExpressionSyntax memberAccessExpr)
             {
-                // Get a precise location on the HasQueryFilter method name
-                var location = invocation.Expression is MemberAccessExpressionSyntax memberAccess
-                    ? memberAccess.Name.GetLocation()
-                    : invocation.GetLocation();
-
-                _deferredDiagnostics.Add(new DeferredDiagnostic(
-                    Descriptors.TL012,
-                    location,
-                    entityType.Name,
-                    contextType.Name));
-                return; // One TL012 per HasQueryFilter call is enough
-            }
-
-            // Value IS rooted in instance — check if the root field is readonly (TL111)
-            var rootField = FindRootInstanceField(valueSide, semanticModel, contextType);
-            if (rootField is not null && rootField.IsReadOnly &&
-                !_poolingUnsafeFields.ContainsKey(contextType))
-            {
-                _poolingUnsafeFields[contextType] = rootField.Name;
-                _deferredDiagnostics.Add(new DeferredDiagnostic(
-                    Descriptors.TL111,
-                    rootField.Locations.FirstOrDefault() ?? Location.None,
-                    contextType.Name,
-                    rootField.Name));
+                if (CheckValueSide(memberAccessExpr.Expression, invocation, semanticModel, entityType, contextType))
+                    return;
             }
         }
+    }
+
+    /// <summary>
+    /// Checks a value expression for TL012 (not rooted in instance) and TL111 (constructor-only field).
+    /// Returns true if TL012 was reported (caller should stop further checks).
+    /// </summary>
+    private bool CheckValueSide(
+        ExpressionSyntax valueSide,
+        InvocationExpressionSyntax hasQueryFilterInvocation,
+        SemanticModel semanticModel,
+        INamedTypeSymbol entityType,
+        INamedTypeSymbol contextType)
+    {
+        // Skip constants and literals — they're intentional
+        var constant = semanticModel.GetConstantValue(valueSide);
+        if (constant.HasValue)
+            return false;
+
+        if (!IsValueRootedInInstance(valueSide, semanticModel, contextType))
+        {
+            var location = hasQueryFilterInvocation.Expression is MemberAccessExpressionSyntax memberAccess
+                ? memberAccess.Name.GetLocation()
+                : hasQueryFilterInvocation.GetLocation();
+
+            _deferredDiagnostics.Add(new DeferredDiagnostic(
+                Descriptors.TL012,
+                location,
+                entityType.Name,
+                contextType.Name));
+            return true; // One TL012 per HasQueryFilter call is enough
+        }
+
+        // Value IS rooted in instance — check if the root field is constructor-only (TL111/TL011)
+        var rootField = FindRootInstanceField(valueSide, semanticModel, contextType);
+        if (rootField is not null && IsFieldAssignedOnlyInConstructors(rootField) &&
+            !_poolingUnsafeFields.ContainsKey(contextType))
+        {
+            _poolingUnsafeFields[contextType] = rootField.Name;
+            _deferredDiagnostics.Add(new DeferredDiagnostic(
+                Descriptors.TL111,
+                rootField.Locations.FirstOrDefault() ?? Location.None,
+                contextType.Name,
+                rootField.Name));
+        }
+
+        return false;
     }
 
     private bool IsEntityTenantPropertyAccess(ExpressionSyntax expression, SemanticModel semanticModel)
@@ -678,6 +720,79 @@ internal sealed class TenantModelBuilder
         }
 
         return null;
+    }
+
+    private bool IsFieldAssignedOnlyInConstructors(IFieldSymbol field)
+    {
+        if (field.IsReadOnly)
+            return true;
+
+        // For non-readonly fields: require that the field IS assigned in at least one
+        // constructor body AND is NOT assigned in any non-constructor member.
+        // Field initializers (e.g., `private string _tid = "t1"`) are NOT counted as
+        // constructor assignments — they are syntactically separate.
+        bool hasCtorAssignment = false;
+
+        var declaringType = field.ContainingType;
+        var typesToCheck = new List<INamedTypeSymbol> { declaringType };
+
+        // Also check derived context types in the compilation
+        foreach (var kvp in _entities)
+        {
+            var contextType = kvp.Value.DbContextType;
+            var current = contextType;
+            while (current is not null &&
+                   !current.Equals(declaringType, SymbolEqualityComparer.Default))
+            {
+                if (current.DeclaringSyntaxReferences.Length > 0 &&
+                    !typesToCheck.Any(t => t.Equals(current, SymbolEqualityComparer.Default)))
+                    typesToCheck.Add(current);
+                current = current.BaseType;
+            }
+        }
+
+        foreach (var type in typesToCheck)
+        {
+            if (type.DeclaringSyntaxReferences.Length == 0)
+                continue;
+
+            foreach (var syntaxRef in type.DeclaringSyntaxReferences)
+            {
+                var typeDecl = syntaxRef.GetSyntax();
+                var semanticModel = _compilation.GetSemanticModel(typeDecl.SyntaxTree);
+
+                foreach (var assignment in typeDecl.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+                {
+                    var leftSymbol = semanticModel.GetSymbolInfo(assignment.Left).Symbol;
+                    if (leftSymbol is not IFieldSymbol assignedField ||
+                        !assignedField.Equals(field, SymbolEqualityComparer.Default))
+                        continue;
+
+                    if (IsInsideConstructor(assignment))
+                        hasCtorAssignment = true;
+                    else
+                        return false; // Assigned outside ctor — can be updated after pool retrieval
+                }
+            }
+        }
+
+        return hasCtorAssignment;
+    }
+
+    private static bool IsInsideConstructor(SyntaxNode node)
+    {
+        var current = node.Parent;
+        while (current is not null)
+        {
+            if (current is ConstructorDeclarationSyntax)
+                return true;
+            // Stop at method/property/local-function boundaries
+            if (current is MethodDeclarationSyntax || current is AccessorDeclarationSyntax ||
+                current is LocalFunctionStatementSyntax)
+                return false;
+            current = current.Parent;
+        }
+        return false;
     }
 
     private bool LambdaReferencesTenantProperty(SyntaxNode lambdaNode, SemanticModel semanticModel)

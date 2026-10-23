@@ -90,8 +90,8 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor TL011 = new(
         id: "TL011",
-        title: "Pooled DbContext has tenant filter on readonly constructor field",
-        messageFormat: "'{0}' is registered with {1} but its tenant filter uses readonly field '{2}' set in the constructor. Pooled instances reuse the first tenant's value. Use a mutable field set after the instance is taken from the pool.",
+        title: "Pooled DbContext has tenant filter on constructor-only field",
+        messageFormat: "'{0}' is registered with {1} but its tenant filter uses field '{2}' which is only assigned in the constructor. Pooled instances reuse the first tenant's value. Assign the field after the instance is taken from the pool.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -99,11 +99,11 @@ internal static class Descriptors
 
     public static readonly DiagnosticDescriptor TL111 = new(
         id: "TL111",
-        title: "Tenant filter references readonly constructor field (unsafe if pooled)",
-        messageFormat: "'{0}' has a tenant filter referencing readonly field '{1}' set only in the constructor. This is unsafe if the context is pooled — the constructor is not re-invoked on pool reuse.",
+        title: "Tenant filter references constructor-only field (unsafe if pooled)",
+        messageFormat: "'{0}' has a tenant filter referencing field '{1}' which is only assigned in the constructor. This is unsafe if the context is pooled — the constructor is not re-invoked on pool reuse.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Info,
-        isEnabledByDefault: true,
+        isEnabledByDefault: false,
         helpLinkUri: HelpLinkBase + "TL011.md");
 
     public static readonly DiagnosticDescriptor TL012 = new(
