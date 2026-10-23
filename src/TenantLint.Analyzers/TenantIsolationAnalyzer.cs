@@ -122,7 +122,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                 symbolContext => AnalyzeNamedTypeSymbol(symbolContext, options),
                 SymbolKind.NamedType);
 
-            // TL010: Detect tenant-scoped entity bound from request body
+            // TL010/TL004: Detect tenant-scoped entity bound from request body / client input
             var aspNetTypes = AspNetCoreTypes.Resolve(compilation);
             if (aspNetTypes.HasAny)
             {
@@ -130,6 +130,17 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                     symbolContext => AnalyzeActionParameterBinding(
                         symbolContext, model, options, aspNetTypes),
                     SymbolKind.Method);
+            }
+
+            // TL010: Detect body-bound tenant entity in minimal API handlers
+            var endpointRouteBuilderExtensions = compilation.GetTypeByMetadataName(
+                "Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions");
+            if (endpointRouteBuilderExtensions is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeMinimalApiHandler(
+                        operationContext, model, options, endpointRouteBuilderExtensions),
+                    OperationKind.Invocation);
             }
 
             // TL005/TL105: Report unfiltered tenant entities via SymbolAction (local diagnostic)
@@ -541,6 +552,89 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         }
 
         return null;
+    }
+
+    private static readonly ImmutableHashSet<string> BodyBindingMapMethods =
+        ImmutableHashSet.Create(StringComparer.Ordinal, "MapPost", "MapPut", "MapPatch");
+
+    private static void AnalyzeMinimalApiHandler(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol endpointRouteBuilderExtensions)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        if (!BodyBindingMapMethods.Contains(targetMethod.Name))
+            return;
+
+        var containingType = targetMethod.ReducedFrom?.ContainingType ?? targetMethod.ContainingType;
+        if (containingType is null ||
+            !containingType.Equals(endpointRouteBuilderExtensions, SymbolEqualityComparer.Default))
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Find the delegate argument — extract its method symbol
+        IMethodSymbol? handlerMethod = null;
+        foreach (var arg in invocation.Arguments)
+        {
+            var value = arg.Value;
+            while (value is IConversionOperation conv)
+                value = conv.Operand;
+
+            if (value is IDelegateCreationOperation delegateCreation)
+            {
+                var target = delegateCreation.Target;
+                if (target is IAnonymousFunctionOperation anonFunc)
+                    handlerMethod = anonFunc.Symbol;
+                else if (target is IMethodReferenceOperation methodRef)
+                    handlerMethod = methodRef.Method;
+                break;
+            }
+        }
+
+        if (handlerMethod is null)
+            return;
+
+        // Check each parameter for body-bound tenant entity
+        foreach (var param in handlerMethod.Parameters)
+        {
+            var paramType = param.Type as INamedTypeSymbol;
+            if (paramType is null)
+                continue;
+
+            if (!model.IsTenantScoped(paramType))
+                continue;
+
+            // In minimal APIs, complex types are body-bound by default for POST/PUT/PATCH.
+            // Skip primitives, strings, CancellationToken, special types.
+            if (param.Type.SpecialType != SpecialType.None)
+                continue;
+            if (param.Type.Name == "String" || param.Type.Name == "CancellationToken" ||
+                param.Type.Name == "HttpContext" || param.Type.Name == "HttpRequest" ||
+                param.Type.Name == "HttpResponse" || param.Type.Name == "ClaimsPrincipal")
+                continue;
+            if (param.Type.TypeKind == TypeKind.Enum)
+                continue;
+
+            var tenantPropertyName = model.TenantEntities.TryGetValue(paramType, out var info)
+                ? info.TenantPropertyName
+                : options.TenantPropertyNames.FirstOrDefault() ?? "TenantId";
+
+            // Report on the handler argument in the MapPost call (more useful location)
+            var location = param.Locations.FirstOrDefault()
+                           ?? invocation.Syntax.GetLocation();
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                Descriptors.TL010,
+                location,
+                paramType.Name,
+                tenantPropertyName));
+        }
     }
 
     private static void AnalyzeCommandTextAssignment(

@@ -10,6 +10,7 @@ public class TL010Tests
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Builder;
 
 namespace Microsoft.AspNetCore.Mvc
 {
@@ -33,6 +34,19 @@ namespace Microsoft.AspNetCore.Mvc
 
     [AttributeUsage(AttributeTargets.Parameter)]
     public class FromHeaderAttribute : Attribute { }
+}
+
+namespace Microsoft.AspNetCore.Builder
+{
+    public interface IEndpointRouteBuilder { }
+
+    public static class EndpointRouteBuilderExtensions
+    {
+        public static void MapPost(this IEndpointRouteBuilder endpoints, string pattern, Delegate handler) { }
+        public static void MapPut(this IEndpointRouteBuilder endpoints, string pattern, Delegate handler) { }
+        public static void MapPatch(this IEndpointRouteBuilder endpoints, string pattern, Delegate handler) { }
+        public static void MapGet(this IEndpointRouteBuilder endpoints, string pattern, Delegate handler) { }
+    }
 }
 
 public class Customer
@@ -217,5 +231,86 @@ is_global = true
 tenantlint.global_entities = Customer
 ";
         await Verify.VerifyWithEfCoreAndOptionsAsync(source, editorconfig);
+    }
+
+    // ===========================================================
+    // Minimal API — Positive
+    // ===========================================================
+
+    [Fact]
+    public async Task MapPost_LambdaHandler_TenantEntity_ReportsTL010()
+    {
+        var source = SharedPreamble + @"
+public class Program
+{
+    public static void Configure(IEndpointRouteBuilder app)
+    {
+        app.MapPost(""/customers"", (Customer {|#0:customer|}) => { });
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL010)
+            .WithLocation(0)
+            .WithArguments("Customer", "TenantId");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task MapPost_MethodGroupHandler_TenantEntity_ReportsTL010()
+    {
+        var source = SharedPreamble + @"
+public static class Handlers
+{
+    public static void CreateCustomer(Customer {|#0:customer|}) { }
+}
+
+public class Program
+{
+    public static void Configure(IEndpointRouteBuilder app)
+    {
+        app.MapPost(""/customers"", Handlers.CreateCustomer);
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL010)
+            .WithLocation(0)
+            .WithArguments("Customer", "TenantId");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    // ===========================================================
+    // Minimal API — Negative
+    // ===========================================================
+
+    [Fact]
+    public async Task MapGet_TenantEntity_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class Program
+{
+    public static void Configure(IEndpointRouteBuilder app)
+    {
+        app.MapGet(""/customers"", (Customer customer) => { });
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task MapPost_DtoParameter_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class Program
+{
+    public static void Configure(IEndpointRouteBuilder app)
+    {
+        app.MapPost(""/customers"", (CustomerDto dto) => { });
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
     }
 }
