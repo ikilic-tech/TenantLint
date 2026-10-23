@@ -216,7 +216,14 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 - **Commits:** Conventional Commits (`feat(TL001): …`, `test: …`, `docs: …`). One rule per PR.
 - Public code, comments, docs and messages are **in English**.
 
-## 5a. Working agreement: CLAUDE.md is the source of truth
+## 5a. Versioning policy
+
+- **SemVer.** Patch (`0.1.x`): false-positive fixes, message/doc changes, no new diagnostics. Minor (`0.x.0`): new rules, new framework support, new `.editorconfig` keys, any change that can produce **new** warnings in existing user code.
+- **Previews** (`-preview.N`) only for risky changes (new rule families, analysis engine changes); otherwise release stable directly.
+- **New Warning rules** are listed under "New rules (may produce new warnings)" in CHANGELOG so users can review before upgrading. Consider shipping a brand-new heuristic rule as Info first, promoting to Warning in a later minor once false-positive rates are validated.
+- **1.0.0** only when rule IDs, `.editorconfig` keys, and `[CrossTenant]` semantics are considered stable. After 1.0, breaking changes (removing a rule ID, changing a key name, changing `[CrossTenant]` behavior) require a major version bump.
+
+## 5b. Working agreement: CLAUDE.md is the source of truth
 
 - Any new rule, rule change, design decision, or verified EF Core/Roslyn
   behavior that the maintainer gives in chat MUST be written into
