@@ -18,4 +18,13 @@ public class OrdersController : ControllerBase
     {
         return Ok(_db.Orders.Where(o => o.TenantId == tenantId).ToList());
     }
+
+    // TL010: deliberate — tenant-scoped entity bound directly from request body (over-posting)
+    [HttpPost]
+    public IActionResult CreateOrder([FromBody] Order order)
+    {
+        _db.Orders.Add(order);
+        _db.SaveChanges();
+        return Ok(order);
+    }
 }
