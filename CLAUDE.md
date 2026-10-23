@@ -249,10 +249,15 @@ A .NET 10 minimal API app (`Microsoft.NET.Sdk.Web`) + EF Core 10 (SQLite) multi-
 - **M3 — TL002** *(Done.)* FromSql verification confirmed filters apply; `FromSql*` excluded. Docs page with heuristic limitations.
 - **M4 — TL003** *(Done.)* Dapper `SqlMapper` detection, same SQL analysis as TL002. Docs page.
 - **M5 — TL005** *(Done.)* Code fix (non-compiling stub). Separate Info-severity IDs: TL102, TL103, TL105. Docs page.
-- **M6 — Release v0.1.0.** *(In progress.)* Sample app (net10.0, named filters, 4 violations), README, pack verification (icon, 0.1.0-preview.1), CI with NuGet Trusted Publishing. Tag pending.
+- **M5a — TL004/TL104** *(Done.)* Client-input tenant identity detection: `[FromHeader]`/`[FromQuery]`/`[FromForm]` parameters, direct `Request.Headers`/`Request.Query`/`Request.Form` reads. TL104 (Info) for `[FromRoute]`.
+- **M5b — TL010** *(Done.)* Over-posting detection: tenant-scoped entities bound from request body via `[FromBody]`, `[FromForm]`, implicit binding, and minimal API handlers.
+- **M5c — TL011/TL111** *(Done.)* Pooled DbContext constructor-only field detection. TL011 (Warning) at pool registration site; TL111 (Info, opt-in) on the DbContext type itself.
+- **M5d — TL012** *(Done.)* `HasQueryFilter` lambda whose tenant value is not rooted in `this` (locals, statics). EF Core bakes the first value into the cached model.
+- **M5e — TL013/TL113** *(Done.)* Raw ADO.NET SQL (`DbCommand.CommandText`, derived constructors). Same SQL analysis as TL002/TL003.
+- **M6 — Release v0.1.0.** *(In progress.)* Sample app (net10.0, named filters, 16 violations), README, pack verification (icon, 0.1.0-preview.1), CI with NuGet Trusted Publishing. Tag pending.
 - **M7 — Anti-tamper (TL201/TL202/TL203).** *(Done.)* TL201 detects `#pragma warning disable TLxxx` without justification comment. TL202 detects `[SuppressMessage]` targeting TL rules without justification. TL203 detects TL rules globally disabled via `<NoWarn>` or `.editorconfig` severity=none. All three are Warning severity.
 - **M8 — ABP bypass (TL014).** *(Done.)* Detects `IDataFilter.Disable<IMultiTenant>()`, `IDataFilter<IMultiTenant>.Disable()`, and `ICurrentTenant.Change()` in ABP projects. `[CrossTenant("reason")]` exempts.
-- **M9 — Remaining v0.2 rules.** *(Done.)* TL006 (cache key without tenant), TL007 (static tenant state), TL008 (background service without scope), TL009 (RLS session variable leak), TL015 (Finbuckle `TenantMismatchMode.Ignore`). All with docs and tests. 378 total tests, 0 failures.
+- **M9 — Remaining v0.2 rules.** *(Done.)* TL006 (cache key without tenant), TL007 (static tenant state), TL008 (background service without scope), TL009 (RLS session variable leak), TL015 (Finbuckle `TenantMismatchMode.Ignore`). All with docs and tests.
 
 Definition of done for a milestone: builds with zero warnings in `src/`, all tests pass, docs updated, CHANGELOG entry added.
 
