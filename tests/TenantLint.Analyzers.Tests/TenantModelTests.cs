@@ -1065,6 +1065,167 @@ public class AppDbContext : DbContext
         Assert.Empty(model.TenantEntities);
     }
 
+    // ===== P1a: FINBUCKLE RECOGNITION =====
+
+    // NOTE: FinbuckleStubs must be prepended BEFORE any using declarations
+    // in test source, so it includes its own usings at the top.
+    private const string FinbuckleStubs = @"
+using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Finbuckle.MultiTenant;
+using Finbuckle.MultiTenant.EntityFrameworkCore;
+
+namespace Finbuckle.MultiTenant
+{
+    [AttributeUsage(AttributeTargets.Class)]
+    public class MultiTenantAttribute : Attribute { }
+
+    public static class EntityTypeBuilderExtensions
+    {
+        public static EntityTypeBuilder IsMultiTenant(this EntityTypeBuilder builder) => builder;
+        public static EntityTypeBuilder<T> IsMultiTenant<T>(this EntityTypeBuilder<T> builder) where T : class => builder;
+    }
+}
+
+namespace Finbuckle.MultiTenant.EntityFrameworkCore
+{
+    public interface IMultiTenantDbContext { }
+
+    public abstract class MultiTenantDbContext : DbContext, IMultiTenantDbContext { }
+}
+";
+
+    [Fact]
+    public async Task Finbuckle_IsMultiTenant_EntityDiscoveredAndFiltered()
+    {
+        var source = FinbuckleStubs + @"
+
+public class Order
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().IsMultiTenant();
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+        Assert.Equal("TenantId", entity.TenantPropertyName);
+    }
+
+    [Fact]
+    public async Task Finbuckle_MultiTenantAttribute_EntityDiscoveredAndFiltered()
+    {
+        // Entity has [MultiTenant] and TenantId — Finbuckle attribute should mark it Filtered
+        var source = FinbuckleStubs + @"
+
+[Finbuckle.MultiTenant.MultiTenant]
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.True(model.HasEfCore);
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+    }
+
+    [Fact]
+    public async Task Finbuckle_MultiTenantDbContext_ConventionEntitiesFiltered()
+    {
+        var source = FinbuckleStubs + @"
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : MultiTenantDbContext
+{
+    public DbSet<Order> Orders { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal(FilterState.Filtered, model.TenantEntities.Values.First().FilterState);
+    }
+
+    [Fact]
+    public async Task NoFinbuckleTypes_NoChange()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
+    }
+
+    [Fact]
+    public async Task UserIsMultiTenant_WrongContainingType_NotDetected()
+    {
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+public static class MyExtensions
+{
+    public static EntityTypeBuilder<T> IsMultiTenant<T>(this EntityTypeBuilder<T> builder) where T : class => builder;
+}
+
+public class Order
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().IsMultiTenant();
+    }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        // User's own IsMultiTenant should NOT mark as Filtered
+        Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
+    }
+
     // ===== P0b: METHOD FOLLOWING =====
 
     [Fact]

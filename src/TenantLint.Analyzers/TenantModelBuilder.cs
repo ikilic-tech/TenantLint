@@ -13,6 +13,12 @@ internal sealed class TenantModelBuilder
     private readonly INamedTypeSymbol? _dbSetOpenType;
     private readonly INamedTypeSymbol? _entityTypeConfigOpenType;
 
+    // Finbuckle types (null if not referenced)
+    private readonly INamedTypeSymbol? _finbuckleExtensions;
+    private readonly INamedTypeSymbol? _finbuckleMultiTenantAttribute;
+    private readonly INamedTypeSymbol? _finbuckleMultiTenantDbContext;
+    private readonly INamedTypeSymbol? _finbuckleIMultiTenantDbContext;
+
     private readonly Dictionary<INamedTypeSymbol, MutableEntityInfo> _entities =
         new(SymbolEqualityComparer.Default);
 
@@ -50,6 +56,16 @@ internal sealed class TenantModelBuilder
         _dbSetOpenType = compilation.GetTypeByMetadataName("Microsoft.EntityFrameworkCore.DbSet`1");
         _entityTypeConfigOpenType = compilation.GetTypeByMetadataName(
             "Microsoft.EntityFrameworkCore.IEntityTypeConfiguration`1");
+
+        // Finbuckle symbols
+        _finbuckleExtensions = compilation.GetTypeByMetadataName(
+            "Finbuckle.MultiTenant.EntityTypeBuilderExtensions");
+        _finbuckleMultiTenantAttribute = compilation.GetTypeByMetadataName(
+            "Finbuckle.MultiTenant.MultiTenantAttribute");
+        _finbuckleMultiTenantDbContext = compilation.GetTypeByMetadataName(
+            "Finbuckle.MultiTenant.EntityFrameworkCore.MultiTenantDbContext");
+        _finbuckleIMultiTenantDbContext = compilation.GetTypeByMetadataName(
+            "Finbuckle.MultiTenant.EntityFrameworkCore.IMultiTenantDbContext");
     }
 
     public TenantModel Build()
@@ -72,6 +88,9 @@ internal sealed class TenantModelBuilder
 
         // Discover entities from Set<T>() calls across the compilation (P0a)
         DiscoverEntitiesFromSetCalls(contextTypes);
+
+        // Discover Finbuckle [MultiTenant] entities (P1a)
+        DiscoverFinbuckleAttributeEntities(contextTypes);
 
         // Propagate explicit filters from base types to derived types (F3).
         // EF Core only allows HasQueryFilter on root entities; the filter applies to all derived types.
@@ -253,6 +272,13 @@ internal sealed class TenantModelBuilder
                     if (entityType is not null)
                         TryRegisterEntity(entityType, contextType);
                 }
+                else if (methodName == "IsMultiTenant" && _finbuckleExtensions is not null &&
+                         reducedFrom.ContainingType?.Equals(_finbuckleExtensions,
+                             SymbolEqualityComparer.Default) == true)
+                {
+                    var entityType = ResolveEntityFromFluentChain(invocation, semanticModel);
+                    RegisterFinbuckleEntity(entityType, contextType);
+                }
             }
 
             // Second pass: follow one level of method calls that receive the ModelBuilder parameter
@@ -336,6 +362,52 @@ internal sealed class TenantModelBuilder
                     var entityType = reducedFrom.TypeArguments[0] as INamedTypeSymbol;
                     if (entityType is not null)
                         TryRegisterEntity(entityType, contextType);
+                }
+                else if (methodName == "IsMultiTenant" && _finbuckleExtensions is not null &&
+                         reducedFrom.ContainingType?.Equals(_finbuckleExtensions,
+                             SymbolEqualityComparer.Default) == true)
+                {
+                    var entityType = ResolveEntityFromFluentChain(invocation, helperSemanticModel);
+                    RegisterFinbuckleEntity(entityType, contextType);
+                }
+            }
+        }
+    }
+
+    private void DiscoverFinbuckleAttributeEntities(ImmutableArray<INamedTypeSymbol> contextTypes)
+    {
+        if (_finbuckleMultiTenantAttribute is null)
+            return;
+
+        // Scan all entities (both already discovered and DbSet entities) for [MultiTenant]
+        var entitiesToCheck = new List<INamedTypeSymbol>(_entities.Keys);
+
+        // Also check all DbSet entity types that may not have been registered
+        foreach (var ctx in contextTypes)
+        {
+            foreach (var member in ctx.GetMembers())
+            {
+                if (member is IPropertySymbol prop && prop.Type is INamedTypeSymbol propType &&
+                    IsDbSetType(propType) && propType.TypeArguments[0] is INamedTypeSymbol entityType)
+                {
+                    if (!entitiesToCheck.Any(e => e.Equals(entityType, SymbolEqualityComparer.Default)))
+                        entitiesToCheck.Add(entityType);
+                }
+            }
+        }
+
+        foreach (var entityType in entitiesToCheck)
+        {
+            foreach (var attr in entityType.GetAttributes())
+            {
+                if (attr.AttributeClass?.Equals(_finbuckleMultiTenantAttribute,
+                        SymbolEqualityComparer.Default) == true)
+                {
+                    var context = FindContextForEntity(entityType)
+                                  ?? (contextTypes.Length == 1 ? contextTypes[0] : null);
+                    if (context is not null)
+                        RegisterFinbuckleEntity(entityType, context);
+                    break;
                 }
             }
         }
@@ -1169,6 +1241,29 @@ internal sealed class TenantModelBuilder
         };
     }
 
+    private void RegisterFinbuckleEntity(INamedTypeSymbol? entityType, INamedTypeSymbol contextType)
+    {
+        if (entityType is null || IsGlobalEntity(entityType))
+            return;
+
+        if (_entities.TryGetValue(entityType, out var existing))
+        {
+            // Already known — mark as filtered by Finbuckle
+            existing.HasExplicitFilter = true;
+        }
+        else
+        {
+            // Finbuckle adds a shadow TenantId property — entity may not have one in source
+            _entities[entityType] = new MutableEntityInfo
+            {
+                EntityType = entityType,
+                TenantPropertyName = "TenantId",
+                HasExplicitFilter = true,
+                DbContextType = contextType,
+            };
+        }
+    }
+
     private bool IsGlobalEntity(INamedTypeSymbol type) =>
         _options.GlobalEntities.Contains(type.Name);
 
@@ -1218,6 +1313,13 @@ internal sealed class TenantModelBuilder
                 _externalBaseContexts.Contains(contextType))
                 continue;
 
+            // Check for Finbuckle base class / interface (P1a)
+            if (IsFinbuckleContext(contextType))
+            {
+                _filteredBaseContexts.Add(contextType);
+                continue;
+            }
+
             var baseType = contextType.BaseType;
             while (baseType is not null)
             {
@@ -1245,6 +1347,20 @@ internal sealed class TenantModelBuilder
                 baseType = baseType.BaseType;
             }
         }
+    }
+
+    private bool IsFinbuckleContext(INamedTypeSymbol contextType)
+    {
+        if (_finbuckleMultiTenantDbContext is not null &&
+            DerivesFrom(contextType, _finbuckleMultiTenantDbContext))
+            return true;
+
+        if (_finbuckleIMultiTenantDbContext is not null &&
+            contextType.AllInterfaces.Any(i =>
+                i.Equals(_finbuckleIMultiTenantDbContext, SymbolEqualityComparer.Default)))
+            return true;
+
+        return false;
     }
 
     private static bool DerivesFrom(INamedTypeSymbol type, INamedTypeSymbol baseType)
