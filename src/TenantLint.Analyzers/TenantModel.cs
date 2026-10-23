@@ -23,23 +23,27 @@ internal sealed class TenantModel
         ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo>.Empty,
         ImmutableHashSet<INamedTypeSymbol>.Empty,
         ImmutableArray<DeferredDiagnostic>.Empty,
+        ImmutableDictionary<INamedTypeSymbol, string>.Empty,
         hasEfCore: false);
 
     public ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo> TenantEntities { get; }
     public ImmutableHashSet<INamedTypeSymbol> DynamicFilterContexts { get; }
     public ImmutableDictionary<string, TenantEntityInfo> TableNameToEntity { get; }
     public ImmutableArray<DeferredDiagnostic> DeferredDiagnostics { get; }
+    public ImmutableDictionary<INamedTypeSymbol, string> PoolingUnsafeFields { get; }
     public bool HasEfCore { get; }
 
     public TenantModel(
         ImmutableDictionary<INamedTypeSymbol, TenantEntityInfo> tenantEntities,
         ImmutableHashSet<INamedTypeSymbol> dynamicFilterContexts,
         ImmutableArray<DeferredDiagnostic> deferredDiagnostics,
+        ImmutableDictionary<INamedTypeSymbol, string> poolingUnsafeFields,
         bool hasEfCore)
     {
         TenantEntities = tenantEntities;
         DynamicFilterContexts = dynamicFilterContexts;
         DeferredDiagnostics = deferredDiagnostics;
+        PoolingUnsafeFields = poolingUnsafeFields;
         HasEfCore = hasEfCore;
 
         var tableBuilder = ImmutableDictionary.CreateBuilder<string, TenantEntityInfo>(

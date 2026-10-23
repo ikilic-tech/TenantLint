@@ -32,6 +32,8 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL103,
             Descriptors.TL005,
             Descriptors.TL105,
+            Descriptors.TL011,
+            Descriptors.TL111,
             Descriptors.TL012,
             Descriptors.TL900,
             Descriptors.TL901,
@@ -169,7 +171,19 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                     SymbolKind.Property);
             }
 
-            // TL012 + TL900: Report deferred diagnostics and dynamic filter contexts
+            // TL011: Detect pooled DbContext registration with readonly tenant filter field
+            var efServiceCollectionExtensions = compilation.GetTypeByMetadataName(
+                "Microsoft.Extensions.DependencyInjection.EntityFrameworkServiceCollectionExtensions");
+
+            if (efServiceCollectionExtensions is not null && model.PoolingUnsafeFields.Count > 0)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzePoolRegistration(
+                        operationContext, model, efServiceCollectionExtensions),
+                    OperationKind.Invocation);
+            }
+
+            // TL011/TL012/TL111 + TL900: Report deferred diagnostics and dynamic filter contexts
             if (model.DeferredDiagnostics.Length > 0 || model.DynamicFilterContexts.Count > 0)
             {
                 compilationStartContext.RegisterCompilationEndAction(endContext =>
@@ -334,6 +348,49 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(
             descriptor, location,
             methodName, result.MatchedTableName, result.MatchedColumnName));
+    }
+
+    private static void AnalyzePoolRegistration(
+        OperationAnalysisContext context,
+        TenantModel model,
+        INamedTypeSymbol efServiceCollectionExtensions)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        var targetMethod = invocation.TargetMethod;
+
+        var containingType = targetMethod.ReducedFrom?.ContainingType ?? targetMethod.ContainingType;
+        if (containingType is null ||
+            !containingType.Equals(efServiceCollectionExtensions, SymbolEqualityComparer.Default))
+            return;
+
+        var methodName = targetMethod.Name;
+        if (methodName != "AddDbContextPool" && methodName != "AddPooledDbContextFactory")
+            return;
+
+        // Get the TContext type argument
+        if (targetMethod.TypeArguments.Length < 1)
+            return;
+
+        var contextType = targetMethod.TypeArguments[0] as INamedTypeSymbol;
+        if (contextType is null)
+            return;
+
+        // Check if this context has a readonly tenant filter field
+        if (!model.PoolingUnsafeFields.TryGetValue(contextType, out var fieldName))
+            return;
+
+        // Narrow location to the method name
+        var location = invocation.Syntax is InvocationExpressionSyntax invocationSyntax
+            && invocationSyntax.Expression is MemberAccessExpressionSyntax memberAccess
+                ? memberAccess.Name.GetLocation()
+                : invocation.Syntax.GetLocation();
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            Descriptors.TL011,
+            location,
+            contextType.Name,
+            methodName,
+            fieldName));
     }
 
     private static void AnalyzeDapperInvocation(

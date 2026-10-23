@@ -166,7 +166,11 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        await Verify.VerifyWithEfCoreAsync(source);
+        // No TL012, but TL111 fires (readonly field)
+        var expected = Verify.Diagnostic(Descriptors.TL111)
+            .WithSpan(12, 29, 12, 38)
+            .WithArguments("AppDbContext", "_tenantId");
+        await Verify.VerifyWithEfCoreAsync(source, expected);
     }
 
     [Fact]
@@ -197,7 +201,11 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        await Verify.VerifyWithEfCoreAsync(source);
+        // No TL012, but TL111 fires (readonly field)
+        var expected = Verify.Diagnostic(Descriptors.TL111)
+            .WithSpan(15, 37, 15, 51)
+            .WithArguments("AppDbContext", "_tenantService");
+        await Verify.VerifyWithEfCoreAsync(source, expected);
     }
 
     [Fact]
@@ -230,7 +238,11 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        await Verify.VerifyWithEfCoreAsync(source);
+        // No TL012, but TL111 fires (readonly field)
+        var expected = Verify.Diagnostic(Descriptors.TL111)
+            .WithSpan(17, 37, 17, 46)
+            .WithArguments("AppDbContext", "_resolver");
+        await Verify.VerifyWithEfCoreAsync(source, expected);
     }
 
     [Fact]

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Rules
 
+- **TL011** (Warning) / **TL111** (Info): detects `HasQueryFilter` lambdas whose tenant value is rooted in a `readonly` field set only in the constructor. TL111 (Info) fires on the DbContext type itself; TL011 (Warning) fires at the `AddDbContextPool` / `AddPooledDbContextFactory` registration site. Pooled instances reuse the first tenant's value. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL011.md)
 - **TL012** (Warning): detects `HasQueryFilter` lambdas whose tenant value is not rooted in the DbContext instance (locals, static fields/properties, static method calls). EF Core caches the model — the first value is baked in and reused for every tenant. [Docs](https://github.com/ikilic-tech/TenantLint/blob/main/docs/rules/TL012.md)
 
 ### Fixed

@@ -26,6 +26,10 @@ internal sealed class TenantModelBuilder
     // Deferred diagnostics collected during model building (reported later by the analyzer)
     private readonly List<DeferredDiagnostic> _deferredDiagnostics = new();
 
+    // Per-context tracking of readonly fields used in tenant filters (for TL011/TL111)
+    private readonly Dictionary<INamedTypeSymbol, string> _poolingUnsafeFields =
+        new(SymbolEqualityComparer.Default);
+
     public TenantModelBuilder(Compilation compilation, ConfigOptions options)
     {
         _compilation = compilation;
@@ -105,6 +109,7 @@ internal sealed class TenantModelBuilder
             entitiesBuilder.ToImmutable(),
             _dynamicFilterContexts.ToImmutableHashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default),
             _deferredDiagnostics.ToImmutableArray(),
+            _poolingUnsafeFields.ToImmutableDictionary(SymbolEqualityComparer.Default),
             hasEfCore: true);
     }
 
@@ -540,6 +545,19 @@ internal sealed class TenantModelBuilder
                     contextType.Name));
                 return; // One TL012 per HasQueryFilter call is enough
             }
+
+            // Value IS rooted in instance — check if the root field is readonly (TL111)
+            var rootField = FindRootInstanceField(valueSide, semanticModel, contextType);
+            if (rootField is not null && rootField.IsReadOnly &&
+                !_poolingUnsafeFields.ContainsKey(contextType))
+            {
+                _poolingUnsafeFields[contextType] = rootField.Name;
+                _deferredDiagnostics.Add(new DeferredDiagnostic(
+                    Descriptors.TL111,
+                    rootField.Locations.FirstOrDefault() ?? Location.None,
+                    contextType.Name,
+                    rootField.Name));
+            }
         }
     }
 
@@ -634,6 +652,32 @@ internal sealed class TenantModelBuilder
             current = current.BaseType;
         }
         return false;
+    }
+
+    private static IFieldSymbol? FindRootInstanceField(
+        ExpressionSyntax expression,
+        SemanticModel semanticModel,
+        INamedTypeSymbol contextType)
+    {
+        var root = GetExpressionRoot(expression);
+
+        if (root is IdentifierNameSyntax identifier)
+        {
+            var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+            if (symbol is IFieldSymbol field && !field.IsStatic &&
+                IsContainedInType(field.ContainingType, contextType))
+                return field;
+        }
+        else if (root is ThisExpressionSyntax thisExpr &&
+                 thisExpr.Parent is MemberAccessExpressionSyntax memberAccess)
+        {
+            var symbol = semanticModel.GetSymbolInfo(memberAccess).Symbol;
+            if (symbol is IFieldSymbol field && !field.IsStatic &&
+                IsContainedInType(field.ContainingType, contextType))
+                return field;
+        }
+
+        return null;
     }
 
     private bool LambdaReferencesTenantProperty(SyntaxNode lambdaNode, SemanticModel semanticModel)
