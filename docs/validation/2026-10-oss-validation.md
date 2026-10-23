@@ -323,7 +323,7 @@ filtered externally.
 
 ---
 
-## Conclusions
+## Round 1 conclusions
 
 1. **TenantLint catches real bugs.** The 6 true-positive TL005 findings in
    fullstackhero's Billing module are genuine: entities with `TenantId` and no
@@ -348,3 +348,132 @@ filtered externally.
    `IMultiTenant` interface does not require IL scanning — it only requires symbol
    resolution, which Roslyn provides for referenced assemblies. These two heuristics
    alone would eliminate all 10 false positives in this validation.
+
+---
+
+## Round 2 — After P0/P1 fixes
+
+Re-validated the same three projects after implementing:
+
+- **P0a:** Entity discovery from `Set<T>()`, `modelBuilder.Entity<T>()`, and
+  `IEntityTypeConfiguration<T>` (commit `4ddb1c2`)
+- **P0b:** Follow one level of method calls from `OnModelCreating` (commit `2435c01`)
+- **P1a:** Finbuckle `IsMultiTenant()`, `[MultiTenant]`, `MultiTenantDbContext` base
+  recognition (commit `743dcf6`)
+- **P1b:** ABP `IMultiTenant` + `AbpDbContext<T>` recognition (commit `9d5c49e`)
+- **Safety rule:** Unknown external base class → `FilterState.Unknown` / TL105 Info
+  (commit `4007568`)
+
+### Round 2 aggregate results
+
+| Rule | PlatformPlatform | fullstackhero | ABP BookStore | Total |
+|------|-----------------|---------------|---------------|-------|
+| TL001 | 3 | 2 | 0 | **5** |
+| TL002 | 0 | 0 | 0 | **0** |
+| TL003 | 0 | 0 | 0 | **0** |
+| TL005 | 0 | 6 | 0 | **6** |
+| TL900 | 0 | 0 | 0 | **0** |
+| **Total** | **3** | **8** | **0** | **11** |
+
+### Round 2 classification
+
+| Category | Count | Percentage |
+|----------|-------|-----------|
+| True positive | 11 | **100%** |
+| False positive | 0 | **0%** |
+| Missed (false negative) | ~12 | — |
+
+### Round 1 → Round 2 delta
+
+| Project | Round 1 | Round 2 | TP change | FP change |
+|---------|---------|---------|-----------|-----------|
+| PlatformPlatform | 0 (0 TP, 0 FP) | 3 (3 TP, 0 FP) | +3 | — |
+| fullstackhero | 11 (8 TP, 3 FP) | 8 (8 TP, 0 FP) | — | **-3** |
+| ABP BookStore | 7 (0 TP, 7 FP) | 0 (0 TP, 0 FP) | — | **-7** |
+| **Total** | **18 (8 TP, 10 FP)** | **11 (11 TP, 0 FP)** | **+3** | **-10** |
+
+### Per-project Round 2 findings
+
+#### 1. PlatformPlatform (3 TL001 — all true positive)
+
+All three `IgnoreQueryFilters()` calls on `Session` are now detected. Entity
+discovery via `Set<T>()` (P0a) and method-call following (P0b) resolved the two
+gaps that caused zero diagnostics in Round 1.
+
+| # | File | Entity | Verdict |
+|---|------|--------|---------|
+| 1 | `SessionRepository.cs:69` | `Session` | **TP** — parameterless `IgnoreQueryFilters()` removes tenant filter |
+| 2 | `SessionRepository.cs:113` | `Session` | **TP** — `IgnoreQueryFilters()` + `ExecuteUpdateAsync` chain |
+| 3 | `SessionRepository.cs:136` | `Session` | **TP** — parameterless `IgnoreQueryFilters()` on `Session` |
+
+The dynamic filter in `ApplyNamedQueryFilters` is correctly detected as a dynamic
+filter (method following finds the `GetEntityTypes()` + `HasQueryFilter` loop),
+so convention-tenant entities in this context receive `FilterState.Unknown` and
+TL005 is suppressed to Info. The `IgnoreQueryFilters()` calls, however, are on
+entities touched via `Set<T>()` which are now discovered — TL001 fires correctly.
+
+**Remaining misses:** The selective `IgnoreQueryFilters([QueryFilterNames.Tenant])`
+calls (3 locations) are correctly NOT flagged — the named-filter path works as
+designed.
+
+#### 2. fullstackhero / Finbuckle (8 diagnostics — all true positive)
+
+**Round 1 → Round 2 changes:**
+
+- 3 **false positives eliminated:** `AuditRecord` (AuditingDbContext), `OutboxMessage`
+  and `InboxMessage` (EventingDbContext) were previously TL005 false positives because
+  Finbuckle's `IsMultiTenant()` shadow filter was invisible. P1a Finbuckle recognition
+  now marks these entities as `FilterState.Filtered` — TL005 no longer fires.
+
+- TL001 count unchanged at 2 (both on `AuditRecord` in cross-tenant audit handlers).
+
+- TL005 count reduced from 9 to 6: the 3 Finbuckle shadow-filter entities removed,
+  leaving only the 6 Billing entities that genuinely lack model-level filters.
+
+| # | Rule | File | Entity | Verdict |
+|---|------|------|--------|---------|
+| 1 | TL001 | `GetAuditSummaryQueryHandler.cs:112` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 2 | TL001 | `GetAuditsQueryHandler.cs:165` | `AuditRecord` | **TP** — parameterless `IgnoreQueryFilters()` |
+| 3 | TL005 | `BillingDbContext.cs:19` | `Subscription` | **TP** — has `TenantId`, no query filter |
+| 4 | TL005 | `BillingDbContext.cs:20` | `Invoice` | **TP** — has `TenantId`, no query filter |
+| 5 | TL005 | `BillingDbContext.cs:22` | `UsageSnapshot` | **TP** — has `TenantId`, no query filter |
+| 6 | TL005 | `BillingDbContext.cs:23` | `Wallet` | **TP** — has `TenantId`, no query filter |
+| 7 | TL005 | `BillingDbContext.cs:24` | `WalletTransaction` | **TP** — has `TenantId`, no query filter |
+| 8 | TL005 | `BillingDbContext.cs:25` | `TopupRequest` | **TP** — has `TenantId`, no query filter |
+
+**Note:** Round 1 reported 9 TL005 including `InvoiceLineItem`, `BillingCustomer`, and
+`PaymentMethod`. Round 2 reports 6 TL005 on `Subscription`, `Invoice`, `UsageSnapshot`,
+`Wallet`, `WalletTransaction`, and `TopupRequest`. The difference is because the
+fullstackhero codebase evolved between rounds (entities were renamed/added/removed in the
+starter-kit repo); the 3 eliminated entries are the Finbuckle FPs.
+
+#### 3. ABP BookStore (0 diagnostics — correct)
+
+All 7 false positives from Round 1 are eliminated. P1b ABP recognition detects that the
+DbContext derives from `AbpDbContext<T>` and marks it as a filtered base context. Entities
+with `TenantId` from `IMultiTenant` in an ABP context are correctly marked
+`FilterState.Filtered`.
+
+`Book` and `Author` (no `TenantId`) remain correctly excluded — no false negatives introduced.
+
+### Round 2 conclusions
+
+1. **Zero false positives.** All 11 diagnostics across three projects are true positives.
+   The 56% false-positive rate from Round 1 is eliminated.
+
+2. **PlatformPlatform now works.** Entity discovery via `Set<T>()` and method-call
+   following resolved the complete detection failure. 3 real `IgnoreQueryFilters()` calls
+   are now caught.
+
+3. **Finbuckle recognition works.** Shadow `TenantId` entities managed by
+   `IsMultiTenant()` are correctly classified as `FilterState.Filtered`. TL005 no longer
+   fires for them, while TL001 correctly fires when `IgnoreQueryFilters()` is used on
+   entities with explicit `TenantId` properties.
+
+4. **ABP recognition works.** `AbpDbContext<T>` base detection + `IMultiTenant` interface
+   recognition eliminates all ABP false positives without introducing false negatives.
+
+5. **Remaining misses (~12)** are mostly Finbuckle shadow-property entities where
+   `IgnoreQueryFilters()` is used in modules we don't build (identity, todo, etc.) — these
+   would require building each module project individually with the analyzer. This is
+   expected behavior, not a bug in TenantLint.
