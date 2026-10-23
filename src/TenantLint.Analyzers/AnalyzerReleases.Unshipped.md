@@ -7,6 +7,7 @@ TL001   | TenantIsolation | Warning  | IgnoreQueryFilters() removes tenant filte
 TL002   | TenantIsolation | Warning  | Raw SQL references tenant table without tenant filtering
 TL003   | TenantIsolation | Warning  | Dapper raw SQL references tenant table without tenant filtering
 TL004   | TenantIsolation | Warning  | Tenant identity received from client input
+TL104   | TenantIsolation | Info     | Tenant identity received from route parameter
 TL005   | TenantIsolation | Warning  | Tenant-scoped entity has no query filter
 TL102   | TenantIsolation | Info     | Raw SQL references tenant table with possible tenant filtering
 TL103   | TenantIsolation | Info     | Dapper raw SQL references tenant table with possible tenant filtering

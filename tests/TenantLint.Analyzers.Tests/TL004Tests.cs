@@ -115,7 +115,7 @@ public class MyController
     }
 
     [Fact]
-    public async Task FromRoute_TenantId_ReportsTL004()
+    public async Task FromRoute_TenantId_ReportsTL104()
     {
         var source = SharedPreamble + @"
 public class MyController
@@ -125,9 +125,9 @@ public class MyController
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL004)
+        var expected = Verify.Diagnostic(Descriptors.TL104)
             .WithLocation(0)
-            .WithArguments("tenantId", "FromRoute");
+            .WithArguments("tenantId");
 
         await Verify.VerifyWithEfCoreAsync(source, expected);
     }

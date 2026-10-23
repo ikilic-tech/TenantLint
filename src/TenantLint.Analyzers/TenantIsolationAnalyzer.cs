@@ -31,6 +31,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL003,
             Descriptors.TL103,
             Descriptors.TL004,
+            Descriptors.TL104,
             Descriptors.TL005,
             Descriptors.TL105,
             Descriptors.TL010,
@@ -1066,19 +1067,32 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
 
         foreach (var param in method.Parameters)
         {
-            // TL004: Check if parameter name matches tenant property names
-            // and is bound from client input ([FromHeader], [FromQuery], [FromRoute], [FromForm])
-            var bindingSource = GetClientInputBindingSource(param, aspNetTypes);
-            if (bindingSource is not null &&
-                options.TenantPropertyNames.Contains(param.Name))
+            // TL004/TL104: Check if parameter name matches tenant property names
+            // and is bound from client input
+            if (options.TenantPropertyNames.Contains(param.Name))
             {
-                var location = param.Locations.FirstOrDefault() ?? Location.None;
-                context.ReportDiagnostic(Diagnostic.Create(
-                    Descriptors.TL004,
-                    location,
-                    param.Name,
-                    bindingSource));
-                continue;
+                var bindingSource = GetClientInputBindingSource(param, aspNetTypes);
+                if (bindingSource is not null)
+                {
+                    var location = param.Locations.FirstOrDefault() ?? Location.None;
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        Descriptors.TL004,
+                        location,
+                        param.Name,
+                        bindingSource));
+                    continue;
+                }
+
+                // TL104: FromRoute — Info severity (route tenants are a legitimate pattern)
+                if (HasAttribute(param, aspNetTypes.FromRoute))
+                {
+                    var location = param.Locations.FirstOrDefault() ?? Location.None;
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        Descriptors.TL104,
+                        location,
+                        param.Name));
+                    continue;
+                }
             }
 
             // TL010: Check if parameter type is a tenant-scoped entity bound from body
@@ -1130,10 +1144,9 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             return "FromHeader";
         if (HasAttribute(param, aspNetTypes.FromQuery))
             return "FromQuery";
-        if (HasAttribute(param, aspNetTypes.FromRoute))
-            return "FromRoute";
         if (HasAttribute(param, aspNetTypes.FromForm))
             return "FromForm";
+        // Note: FromRoute is handled separately as TL104 (Info severity)
         return null;
     }
 
