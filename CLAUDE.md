@@ -204,6 +204,9 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
   package versions and date.
 - At the end of each milestone, check that CLAUDE.md matches the code
   (rules table, IDs, severities, milestones) and fix any drift.
+- **Never write vulnerability details about third-party projects into
+  this repository** (code, docs, commit messages). Keep them in
+  `~/tenantlint-private/` and report via private channels.
 
 ## 6. Sample app (`samples/SampleSaaS`)
 

@@ -29,3 +29,6 @@ Thumbs.db
 
 ## Build
 TestResults/
+
+## Spikes (kept outside repo; ignore if recreated locally)
+spike-*/
