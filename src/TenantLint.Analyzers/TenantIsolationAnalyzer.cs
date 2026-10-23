@@ -35,6 +35,8 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             Descriptors.TL011,
             Descriptors.TL111,
             Descriptors.TL012,
+            Descriptors.TL013,
+            Descriptors.TL113,
             Descriptors.TL900,
             Descriptors.TL901,
             Descriptors.TL902);
@@ -181,6 +183,27 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                     operationContext => AnalyzePoolRegistration(
                         operationContext, model, efServiceCollectionExtensions),
                     OperationKind.Invocation);
+            }
+
+            // TL013/TL113: Detect raw ADO.NET SQL on tenant tables
+            var dbCommandType = compilation.GetTypeByMetadataName("System.Data.Common.DbCommand");
+            var iDbCommandType = compilation.GetTypeByMetadataName("System.Data.IDbCommand");
+
+            if (dbCommandType is not null || iDbCommandType is not null)
+            {
+                compilationStartContext.RegisterOperationAction(
+                    operationContext => AnalyzeCommandTextAssignment(
+                        operationContext, model, options,
+                        dbCommandType, iDbCommandType),
+                    OperationKind.SimpleAssignment);
+
+                if (dbCommandType is not null)
+                {
+                    compilationStartContext.RegisterOperationAction(
+                        operationContext => AnalyzeDbCommandCreation(
+                            operationContext, model, options, dbCommandType),
+                        OperationKind.ObjectCreation);
+                }
             }
 
             // TL011/TL012/TL111 + TL900: Report deferred diagnostics and dynamic filter contexts
@@ -506,6 +529,144 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
         }
 
         return null;
+    }
+
+    private static void AnalyzeCommandTextAssignment(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol? dbCommandType,
+        INamedTypeSymbol? iDbCommandType)
+    {
+        var assignment = (ISimpleAssignmentOperation)context.Operation;
+
+        // Check if LHS is CommandText property
+        if (assignment.Target is not IPropertyReferenceOperation propertyRef)
+            return;
+
+        if (propertyRef.Property.Name != "CommandText")
+            return;
+
+        // Check if the property's containing type derives from DbCommand or implements IDbCommand
+        var receiverType = propertyRef.Instance?.Type;
+        if (receiverType is null)
+            return;
+
+        if (!DerivesFromOrImplements(receiverType, dbCommandType, iDbCommandType))
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Extract SQL text from RHS
+        if (!SqlAnalyzer.TryExtractSqlFromOperation(assignment.Value, out var sqlText))
+            return;
+
+        var result = SqlAnalyzer.Analyze(sqlText, model, options);
+        if (!result.HasTenantTableReference)
+            return;
+
+        var descriptor = result.HasTenantColumnInPredicate
+            ? Descriptors.TL113
+            : Descriptors.TL013;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            descriptor, assignment.Syntax.GetLocation(),
+            "CommandText", result.MatchedTableName, result.MatchedColumnName));
+    }
+
+    private static void AnalyzeDbCommandCreation(
+        OperationAnalysisContext context,
+        TenantModel model,
+        ConfigOptions options,
+        INamedTypeSymbol dbCommandType)
+    {
+        var creation = (IObjectCreationOperation)context.Operation;
+
+        // Check if the created type derives from DbCommand
+        var createdType = creation.Type as INamedTypeSymbol;
+        if (createdType is null)
+            return;
+
+        if (!DerivesFrom(createdType, dbCommandType))
+            return;
+
+        // Check [CrossTenant] exemption
+        if (IsExemptByCrossTenant(context.ContainingSymbol, options.CrossTenantAttribute))
+            return;
+
+        // Find the string parameter (named "cmdText" or "commandText", or ordinal 0 if string)
+        string? sqlText = null;
+        foreach (var arg in creation.Arguments)
+        {
+            var paramName = arg.Parameter?.Name;
+            if (paramName == "cmdText" || paramName == "commandText")
+            {
+                SqlAnalyzer.TryExtractSqlFromArgument(arg, out sqlText);
+                break;
+            }
+
+            // Fallback: first string parameter at ordinal 0
+            if (arg.Parameter?.Ordinal == 0 &&
+                arg.Parameter.Type.SpecialType == SpecialType.System_String)
+            {
+                SqlAnalyzer.TryExtractSqlFromArgument(arg, out sqlText);
+                break;
+            }
+        }
+
+        if (sqlText is null || sqlText.Length == 0)
+            return;
+
+        var result = SqlAnalyzer.Analyze(sqlText, model, options);
+        if (!result.HasTenantTableReference)
+            return;
+
+        var descriptor = result.HasTenantColumnInPredicate
+            ? Descriptors.TL113
+            : Descriptors.TL013;
+
+        var typeName = createdType.Name;
+
+        context.ReportDiagnostic(Diagnostic.Create(
+            descriptor, creation.Syntax.GetLocation(),
+            typeName, result.MatchedTableName, result.MatchedColumnName));
+    }
+
+    private static bool DerivesFromOrImplements(
+        ITypeSymbol type,
+        INamedTypeSymbol? baseType,
+        INamedTypeSymbol? interfaceType)
+    {
+        if (baseType is not null && DerivesFrom(type, baseType))
+            return true;
+
+        if (interfaceType is not null)
+        {
+            if (type.Equals(interfaceType, SymbolEqualityComparer.Default))
+                return true;
+            foreach (var iface in type.AllInterfaces)
+            {
+                if (iface.Equals(interfaceType, SymbolEqualityComparer.Default))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool DerivesFrom(ITypeSymbol type, INamedTypeSymbol baseType)
+    {
+        var current = type.BaseType;
+        while (current is not null)
+        {
+            if (current.Equals(baseType, SymbolEqualityComparer.Default))
+                return true;
+            current = current.BaseType;
+        }
+
+        return false;
     }
 
     private static bool IsDapperSqlMethod(string methodName) =>

@@ -15,4 +15,6 @@ TL901   | TenantIsolation | Info     | CrossTenant attribute should state a reas
 TL011   | TenantIsolation | Warning  | Pooled DbContext has tenant filter on constructor-only field
 TL111   | TenantIsolation | Disabled | Tenant filter references constructor-only field (unsafe if pooled)
 TL012   | TenantIsolation | Warning  | HasQueryFilter references a value not rooted in the DbContext instance
+TL013   | TenantIsolation | Warning  | Raw ADO.NET SQL references tenant table without tenant filtering
+TL113   | TenantIsolation | Info     | Raw ADO.NET SQL references tenant table with possible tenant filtering
 TL902   | TenantIsolation | Warning  | Class-level CrossTenant suppresses all methods

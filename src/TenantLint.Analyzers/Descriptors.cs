@@ -115,6 +115,24 @@ internal static class Descriptors
         isEnabledByDefault: true,
         helpLinkUri: HelpLinkBase + "TL012.md");
 
+    public static readonly DiagnosticDescriptor TL013 = new(
+        id: "TL013",
+        title: "Raw ADO.NET SQL references tenant table without tenant filtering",
+        messageFormat: "'{0}' references tenant table '{1}' in raw SQL without apparent tenant filtering. Ensure the query includes WHERE {2} = @param or mark the method [CrossTenant(\"reason\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL013.md");
+
+    public static readonly DiagnosticDescriptor TL113 = new(
+        id: "TL113",
+        title: "Raw ADO.NET SQL references tenant table with possible tenant filtering",
+        messageFormat: "'{0}' references tenant table '{1}' in raw SQL. Tenant column '{2}' appears in a predicate clause, but verify the filter is correct.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        helpLinkUri: HelpLinkBase + "TL013.md");
+
     public static readonly DiagnosticDescriptor TL900 = new(
         id: "TL900",
         title: "Dynamic query filter detected",

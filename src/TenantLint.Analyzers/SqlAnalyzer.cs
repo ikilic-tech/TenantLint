@@ -179,7 +179,7 @@ internal static class SqlAnalyzer
         return TryExtractSqlFromSyntax(argument, out sqlText);
     }
 
-    private static bool TryExtractSqlFromOperation(IOperation operation, out string sqlText)
+    internal static bool TryExtractSqlFromOperation(IOperation operation, out string sqlText)
     {
         sqlText = "";
 
