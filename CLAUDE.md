@@ -228,12 +228,12 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 
 ## 6. Sample app (`samples/SampleSaaS`)
 
-A .NET 10 console app + EF Core 10 (SQLite) multi-tenant sample — `Customer`, `Order`, `Invoice` (tenant-scoped), `Tenant`, `Country` (global). Uses EF Core 10 **named filters** (`"Tenant"` and `"SoftDelete"` on Customer) so TL001's selective fix suggestion (`IgnoreQueryFilters(["SoftDelete"])`) is visible in build output. Contains **one deliberate violation per rule**, each marked `// TL00x: deliberate`, so `dotnet build samples/SampleSaaS` shows every diagnostic. Has its own `samples/global.json` (pinned to .NET 10 SDK) and `samples/Directory.Build.props` (CPM disabled) to isolate from the main solution.
+A .NET 10 minimal API app (`Microsoft.NET.Sdk.Web`) + EF Core 10 (SQLite) multi-tenant sample — `Customer`, `Order`, `Invoice` (tenant-scoped), `Tenant`, `Country` (global). Uses EF Core 10 **named filters** (`"Tenant"` and `"SoftDelete"` on Customer) so TL001's selective fix suggestion (`IgnoreQueryFilters(["SoftDelete"])`) is visible in build output. Contains **one deliberate violation per rule**, each marked `// TLxxx: deliberate`, so `dotnet build samples/SampleSaaS` shows every diagnostic. Has its own `samples/global.json` (pinned to .NET 10 SDK) and `samples/Directory.Build.props` (CPM disabled) to isolate from the main solution. Rules that require ABP or Finbuckle (TL014, TL015) are not demonstrated.
 
 ## 7. CI (`.github/workflows/ci.yml`)
 - Matrix: ubuntu-latest, windows-latest; .NET 8 + 10 SDKs.
 - `dotnet build -warnaserror` (src), `dotnet test`, `dotnet pack`.
-- Build the sample (from `samples/SampleSaaS/` working directory so `samples/global.json` is used) and assert TL001/TL002/TL003/TL005 appear in build output.
+- Build the sample (from `samples/SampleSaaS/` working directory so `samples/global.json` is used) and assert all 16 demonstrated rule IDs appear in build output.
 - On tag `v*`: pack and publish to NuGet via **NuGet Trusted Publishing** (`NuGet/login@v1` with `secrets.NUGET_USER`, short-lived OIDC key). No long-lived `NUGET_API_KEY` secret. Create a GitHub Release with notes from CHANGELOG.
 
 ## 8. Milestones (work in this order; stop after each for maintainer review)
