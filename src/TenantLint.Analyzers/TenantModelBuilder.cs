@@ -19,6 +19,10 @@ internal sealed class TenantModelBuilder
     private readonly INamedTypeSymbol? _finbuckleMultiTenantDbContext;
     private readonly INamedTypeSymbol? _finbuckleIMultiTenantDbContext;
 
+    // ABP types (null if not referenced)
+    private readonly INamedTypeSymbol? _abpIMultiTenant;
+    private readonly INamedTypeSymbol? _abpDbContextOpen;
+
     private readonly Dictionary<INamedTypeSymbol, MutableEntityInfo> _entities =
         new(SymbolEqualityComparer.Default);
 
@@ -66,6 +70,12 @@ internal sealed class TenantModelBuilder
             "Finbuckle.MultiTenant.EntityFrameworkCore.MultiTenantDbContext");
         _finbuckleIMultiTenantDbContext = compilation.GetTypeByMetadataName(
             "Finbuckle.MultiTenant.EntityFrameworkCore.IMultiTenantDbContext");
+
+        // ABP symbols
+        _abpIMultiTenant = compilation.GetTypeByMetadataName(
+            "Volo.Abp.MultiTenancy.IMultiTenant");
+        _abpDbContextOpen = compilation.GetTypeByMetadataName(
+            "Volo.Abp.EntityFrameworkCore.AbpDbContext`1");
     }
 
     public TenantModel Build()
@@ -91,6 +101,9 @@ internal sealed class TenantModelBuilder
 
         // Discover Finbuckle [MultiTenant] entities (P1a)
         DiscoverFinbuckleAttributeEntities(contextTypes);
+
+        // Discover ABP IMultiTenant entities (P1b)
+        DiscoverAbpEntities(contextTypes);
 
         // Propagate explicit filters from base types to derived types (F3).
         // EF Core only allows HasQueryFilter on root entities; the filter applies to all derived types.
@@ -1264,6 +1277,90 @@ internal sealed class TenantModelBuilder
         }
     }
 
+    private void DiscoverAbpEntities(ImmutableArray<INamedTypeSymbol> contextTypes)
+    {
+        if (_abpIMultiTenant is null)
+            return;
+
+        // Find ABP contexts
+        var abpContexts = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var ctx in contextTypes)
+        {
+            if (IsAbpContext(ctx))
+                abpContexts.Add(ctx);
+        }
+
+        if (abpContexts.Count == 0)
+            return;
+
+        // For each ABP context, scan DbSet entities and registered entities for IMultiTenant
+        foreach (var ctx in abpContexts)
+        {
+            // Check already-registered entities belonging to this context
+            foreach (var kvp in _entities)
+            {
+                if (!kvp.Value.DbContextType.Equals(ctx, SymbolEqualityComparer.Default))
+                    continue;
+
+                if (ImplementsInterface(kvp.Value.EntityType, _abpIMultiTenant))
+                    kvp.Value.HasExplicitFilter = true;
+            }
+
+            // Also scan DbSet entities that might not be registered yet
+            foreach (var member in ctx.GetMembers())
+            {
+                if (member is not IPropertySymbol prop || prop.Type is not INamedTypeSymbol propType)
+                    continue;
+
+                if (!IsDbSetType(propType) || propType.TypeArguments[0] is not INamedTypeSymbol entityType)
+                    continue;
+
+                if (!ImplementsInterface(entityType, _abpIMultiTenant))
+                    continue;
+
+                if (_entities.TryGetValue(entityType, out var existing))
+                {
+                    existing.HasExplicitFilter = true;
+                }
+                else if (!IsGlobalEntity(entityType))
+                {
+                    // ABP's IMultiTenant defines TenantId
+                    var tenantProp = FindTenantProperty(entityType) ?? "TenantId";
+                    _entities[entityType] = new MutableEntityInfo
+                    {
+                        EntityType = entityType,
+                        TenantPropertyName = tenantProp,
+                        HasExplicitFilter = true,
+                        DbContextType = ctx,
+                        DbSetPropertyName = prop.Name,
+                        DbSetProperty = prop,
+                    };
+                }
+            }
+        }
+    }
+
+    private bool IsAbpContext(INamedTypeSymbol contextType)
+    {
+        if (_abpDbContextOpen is null)
+            return false;
+
+        var current = contextType.BaseType;
+        while (current is not null)
+        {
+            if (current.OriginalDefinition.Equals(_abpDbContextOpen, SymbolEqualityComparer.Default))
+                return true;
+            current = current.BaseType;
+        }
+        return false;
+    }
+
+    private static bool ImplementsInterface(INamedTypeSymbol type, INamedTypeSymbol iface)
+    {
+        return type.AllInterfaces.Any(i =>
+            i.Equals(iface, SymbolEqualityComparer.Default));
+    }
+
     private bool IsGlobalEntity(INamedTypeSymbol type) =>
         _options.GlobalEntities.Contains(type.Name);
 
@@ -1315,6 +1412,13 @@ internal sealed class TenantModelBuilder
 
             // Check for Finbuckle base class / interface (P1a)
             if (IsFinbuckleContext(contextType))
+            {
+                _filteredBaseContexts.Add(contextType);
+                continue;
+            }
+
+            // Check for ABP base class (P1b)
+            if (IsAbpContext(contextType))
             {
                 _filteredBaseContexts.Add(contextType);
                 continue;

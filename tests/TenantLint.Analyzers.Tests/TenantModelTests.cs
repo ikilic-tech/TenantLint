@@ -1226,6 +1226,122 @@ public class AppDbContext : DbContext
         Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
     }
 
+    // ===== P1b: ABP IMultiTenant =====
+
+    private const string AbpStubs = @"
+using System;
+using Microsoft.EntityFrameworkCore;
+using Volo.Abp.MultiTenancy;
+using Volo.Abp.EntityFrameworkCore;
+
+namespace Volo.Abp.MultiTenancy
+{
+    public interface IMultiTenant
+    {
+        Guid? TenantId { get; }
+    }
+}
+
+namespace Volo.Abp.EntityFrameworkCore
+{
+    public abstract class AbpDbContext<TDbContext> : DbContext where TDbContext : DbContext
+    {
+    }
+}
+";
+
+    [Fact]
+    public async Task Abp_IMultiTenant_InAbpDbContext_Filtered()
+    {
+        var source = AbpStubs + @"
+
+public class Order : IMultiTenant
+{
+    public int Id { get; set; }
+    public Guid? TenantId { get; set; }
+}
+
+public class BookStoreDbContext : AbpDbContext<BookStoreDbContext>
+{
+    public DbSet<Order> Orders { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+        Assert.Equal("TenantId", entity.TenantPropertyName);
+    }
+
+    [Fact]
+    public async Task Abp_IMultiTenant_TenantIdFromInterface_Discovered()
+    {
+        var source = AbpStubs + @"
+
+public class Product : IMultiTenant
+{
+    public int Id { get; set; }
+    public Guid? TenantId { get; set; }
+}
+
+public class AppDbContext : AbpDbContext<AppDbContext>
+{
+    public DbSet<Product> Products { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        var entity = model.TenantEntities.Values.First();
+        Assert.Equal("TenantId", entity.TenantPropertyName);
+        Assert.Equal(FilterState.Filtered, entity.FilterState);
+    }
+
+    [Fact]
+    public async Task Abp_IMultiTenant_PlainDbContext_NotMarkedFiltered()
+    {
+        // Entity implements IMultiTenant but context is plain DbContext (no ABP)
+        var source = AbpStubs + @"
+
+public class Order : IMultiTenant
+{
+    public int Id { get; set; }
+    public Guid? TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        // Standard discovery finds TenantId; without ABP context it stays Unfiltered
+        Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
+    }
+
+    [Fact]
+    public async Task NoAbpTypes_NoChange()
+    {
+        // No ABP types in compilation — standard behavior
+        var source = @"
+using Microsoft.EntityFrameworkCore;
+
+public class Customer
+{
+    public int Id { get; set; }
+    public string TenantId { get; set; }
+}
+
+public class AppDbContext : DbContext
+{
+    public DbSet<Customer> Customers { get; set; }
+}
+";
+        var model = await BuildModelAsync(source);
+        Assert.Single(model.TenantEntities);
+        Assert.Equal(FilterState.Unfiltered, model.TenantEntities.Values.First().FilterState);
+    }
+
     // ===== P0b: METHOD FOLLOWING =====
 
     [Fact]
