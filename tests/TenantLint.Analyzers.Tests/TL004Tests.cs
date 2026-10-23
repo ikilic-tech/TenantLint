@@ -47,12 +47,20 @@ namespace Microsoft.AspNetCore.Http
     public interface IQueryCollection
     {
         string this[string key] { get; }
+        bool TryGetValue(string key, out string value);
+    }
+
+    public interface IFormCollection
+    {
+        string this[string key] { get; }
+        bool TryGetValue(string key, out string value);
     }
 
     public class HttpRequest
     {
         public IHeaderDictionary Headers { get; set; }
         public IQueryCollection Query { get; set; }
+        public IFormCollection Form { get; set; }
     }
 }
 
@@ -297,6 +305,97 @@ public class MyController
             .WithArguments("tenantId", "Request.Query");
 
         await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Query_TryGetValue_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        {|#0:request.Query.TryGetValue(""tenantId"", out var value)|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "Request.Query");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Form_Indexer_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var tid = {|#0:request.Form[""tenantId""]|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "Request.Form");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    [Fact]
+    public async Task Form_TryGetValue_TenantId_ReportsTL004()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        {|#0:request.Form.TryGetValue(""tenantId"", out var value)|};
+    }
+}
+";
+        var expected = Verify.Diagnostic(Descriptors.TL004)
+            .WithLocation(0)
+            .WithArguments("tenantId", "Request.Form");
+
+        await Verify.VerifyWithEfCoreAsync(source, expected);
+    }
+
+    // ===========================================================
+    // Direct header/query/form reads — Negative
+    // ===========================================================
+
+    [Fact]
+    public async Task Form_Indexer_NonTenantKey_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        var name = request.Form[""username""];
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
+    }
+
+    [Fact]
+    public async Task Query_TryGetValue_NonTenantKey_NoDiagnostic()
+    {
+        var source = SharedPreamble + @"
+public class MyController
+{
+    public void Get(HttpRequest request)
+    {
+        request.Query.TryGetValue(""page"", out var value);
+    }
+}
+";
+        await Verify.VerifyWithEfCoreAsync(source);
     }
 
     // ===========================================================

@@ -192,7 +192,7 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             }
 
             // TL004: Detect direct header/query reads for tenant values
-            if (aspNetTypes.HasHeaderOrQuery)
+            if (aspNetTypes.HasHeaderQueryOrForm)
             {
                 compilationStartContext.RegisterOperationAction(
                     operationContext => AnalyzeDirectHeaderQueryAccess(
@@ -790,6 +790,12 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
             sourceLabel = "Request.Query";
             isHeader = false;
         }
+        else if (aspNetTypes.FormCollection is not null &&
+                 DerivesFromOrImplements(receiverType, null, aspNetTypes.FormCollection))
+        {
+            sourceLabel = "Request.Form";
+            isHeader = false;
+        }
         else
         {
             return;
@@ -842,6 +848,12 @@ public sealed class TenantIsolationAnalyzer : DiagnosticAnalyzer
                  DerivesFromOrImplements(receiverType, null, aspNetTypes.QueryCollection))
         {
             sourceLabel = "Request.Query";
+            isHeader = false;
+        }
+        else if (aspNetTypes.FormCollection is not null &&
+                 DerivesFromOrImplements(receiverType, null, aspNetTypes.FormCollection))
+        {
+            sourceLabel = "Request.Form";
             isHeader = false;
         }
         else
@@ -2180,12 +2192,13 @@ internal sealed class AspNetCoreTypes
     public INamedTypeSymbol? FromHeader { get; }
     public INamedTypeSymbol? HeaderDictionary { get; }
     public INamedTypeSymbol? QueryCollection { get; }
+    public INamedTypeSymbol? FormCollection { get; }
 
     public bool HasAny =>
         FromBody is not null || FromForm is not null || ApiController is not null;
 
-    public bool HasHeaderOrQuery =>
-        HeaderDictionary is not null || QueryCollection is not null;
+    public bool HasHeaderQueryOrForm =>
+        HeaderDictionary is not null || QueryCollection is not null || FormCollection is not null;
 
     private AspNetCoreTypes(
         INamedTypeSymbol? fromBody,
@@ -2196,7 +2209,8 @@ internal sealed class AspNetCoreTypes
         INamedTypeSymbol? fromQuery,
         INamedTypeSymbol? fromHeader,
         INamedTypeSymbol? headerDictionary,
-        INamedTypeSymbol? queryCollection)
+        INamedTypeSymbol? queryCollection,
+        INamedTypeSymbol? formCollection)
     {
         FromBody = fromBody;
         FromForm = fromForm;
@@ -2207,6 +2221,7 @@ internal sealed class AspNetCoreTypes
         FromHeader = fromHeader;
         HeaderDictionary = headerDictionary;
         QueryCollection = queryCollection;
+        FormCollection = formCollection;
     }
 
     public static AspNetCoreTypes Resolve(Compilation compilation)
@@ -2220,6 +2235,7 @@ internal sealed class AspNetCoreTypes
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromQueryAttribute"),
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.FromHeaderAttribute"),
             compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IHeaderDictionary"),
-            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IQueryCollection"));
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IQueryCollection"),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormCollection"));
     }
 }
