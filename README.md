@@ -30,10 +30,8 @@ and flags code that can leak one tenant's data to another.
 ## Install
 
 ```
-dotnet add package TenantLint.Analyzers --prerelease
+dotnet add package TenantLint.Analyzers
 ```
-
-> Drop `--prerelease` after 0.1.0 stable is published.
 
 No configuration required. Works with plain EF Core `HasQueryFilter`,
 Finbuckle, ABP, or any hand-rolled multi-tenant setup. No base classes,
