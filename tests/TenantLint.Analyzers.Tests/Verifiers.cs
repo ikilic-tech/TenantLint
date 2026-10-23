@@ -15,7 +15,10 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
     // so we exclude them in helpers that don't provide an .editorconfig.
     // Tests that need these diagnostics should use the *AndOptions* helpers
     // with an .editorconfig that explicitly enables them.
-    internal static readonly string[] DisabledByDefaultIds = { "TL111" };
+    // Diagnostics suppressed in test helpers to avoid interference:
+    // TL111: disabled by default (opt-in only)
+    // TL201: fires on auto-inserted #pragma warning disable in test framework
+    internal static readonly string[] DisabledByDefaultIds = { "TL111", "TL201" };
 
     public static readonly ReferenceAssemblies Net80WithEfCore =
         ReferenceAssemblies.Net.Net80.AddPackages(
@@ -114,6 +117,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net80WithEfCore,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.TestState.AnalyzerConfigFiles.Add(
             ("/.editorconfig", editorconfigContent));
         test.ExpectedDiagnostics.AddRange(expected);
@@ -130,6 +134,7 @@ public static class CSharpAnalyzerVerifier<TAnalyzer>
             TestCode = source,
             ReferenceAssemblies = Net100WithEfCore10,
         };
+        test.DisabledDiagnostics.AddRange(DisabledByDefaultIds);
         test.TestState.AnalyzerConfigFiles.Add(
             ("/.editorconfig", editorconfigContent));
         test.ExpectedDiagnostics.AddRange(expected);

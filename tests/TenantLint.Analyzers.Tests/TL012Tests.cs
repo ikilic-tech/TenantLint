@@ -55,7 +55,7 @@ public class Order
 
 public class AppDbContext : DbContext
 {
-    public static string CurrentTenantId = ""t1"";
+    public static string {|#1:CurrentTenantId|} = ""t1"";
     public DbSet<Order> Orders { get; set; }
 
     protected override void OnModelCreating(ModelBuilder m)
@@ -64,11 +64,15 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL012)
+        var expectedTL012 = Verify.Diagnostic(Descriptors.TL012)
             .WithLocation(0)
             .WithArguments("Order", "AppDbContext");
 
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        var expectedTL007 = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(1)
+            .WithArguments("CurrentTenantId");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL012, expectedTL007);
     }
 
     [Fact]
@@ -361,7 +365,7 @@ public class Order
 
 public static class TenantHelper
 {
-    public static List<string> AllowedTenants { get; set; } = new();
+    public static List<string> {|#1:AllowedTenants|} { get; set; } = new();
 }
 
 public class AppDbContext : DbContext
@@ -374,11 +378,15 @@ public class AppDbContext : DbContext
     }
 }
 ";
-        var expected = Verify.Diagnostic(Descriptors.TL012)
+        var expectedTL012 = Verify.Diagnostic(Descriptors.TL012)
             .WithLocation(0)
             .WithArguments("Order", "AppDbContext");
 
-        await Verify.VerifyWithEfCoreAsync(source, expected);
+        var expectedTL007 = Verify.Diagnostic(Descriptors.TL007)
+            .WithLocation(1)
+            .WithArguments("AllowedTenants");
+
+        await Verify.VerifyWithEfCoreAsync(source, expectedTL012, expectedTL007);
     }
 
     [Fact]

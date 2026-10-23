@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.CSharp.Testing;
+using Microsoft.CodeAnalysis.Testing;
 using Xunit;
 
 namespace TenantLint.Analyzers.Tests;
@@ -10,6 +12,26 @@ public class TL011Tests
 is_global = true
 dotnet_diagnostic.TL111.severity = suggestion
 ";
+
+    /// <summary>
+    /// Creates a test instance that enables TL111 via editorconfig without suppressing it
+    /// via DisabledDiagnostics (which would override the editorconfig setting).
+    /// Only TL201 is suppressed to avoid interference from auto-inserted pragmas.
+    /// </summary>
+    private static CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier> CreateTL111Test(
+        string source, params DiagnosticResult[] expected)
+    {
+        var test = new CSharpAnalyzerTest<TenantIsolationAnalyzer, DefaultVerifier>
+        {
+            TestCode = source,
+            ReferenceAssemblies = CSharpAnalyzerVerifier<TenantIsolationAnalyzer>.Net80WithEfCore,
+        };
+        // Only suppress TL201, not TL111 — TL111 is being explicitly enabled via editorconfig
+        test.DisabledDiagnostics.Add("TL201");
+        test.TestState.AnalyzerConfigFiles.Add(("/.editorconfig", EnableTL111));
+        test.ExpectedDiagnostics.AddRange(expected);
+        return test;
+    }
 
     // ===========================================================
     // TL111 — Info on DbContext (opt-in, constructor-only field)
@@ -47,7 +69,8 @@ public class AppDbContext : DbContext
             .WithSpan(12, 29, 12, 38)
             .WithArguments("AppDbContext", "_tenantId");
 
-        await Verify.VerifyWithEfCoreAndOptionsAsync(source, EnableTL111, expected);
+        var test = CreateTL111Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -84,7 +107,8 @@ public class AppDbContext : DbContext
             .WithSpan(14, 37, 14, 51)
             .WithArguments("AppDbContext", "_tenantService");
 
-        await Verify.VerifyWithEfCoreAndOptionsAsync(source, EnableTL111, expected);
+        var test = CreateTL111Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -120,7 +144,8 @@ public class AppDbContext : DbContext
             .WithSpan(12, 20, 12, 29)
             .WithArguments("AppDbContext", "_tenantId");
 
-        await Verify.VerifyWithEfCoreAndOptionsAsync(source, EnableTL111, expected);
+        var test = CreateTL111Test(source, expected);
+        await test.RunAsync(CancellationToken.None);
     }
 
     [Fact]
