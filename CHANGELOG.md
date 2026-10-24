@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **TL007**: message tail now says "static members are shared" instead of "static fields are shared" (kind-neutral).
+
 ## [0.1.1] - 2026-10-24
 
 ### Fixed

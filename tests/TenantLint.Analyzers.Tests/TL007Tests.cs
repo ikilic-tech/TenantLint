@@ -363,7 +363,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("field", "TenantId");
+            .WithMessage("Static field 'TenantId' holds tenant state; static members are shared across all requests and tenants");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
@@ -380,7 +380,7 @@ class State
 ";
         var expected = Verify.Diagnostic(Descriptors.TL007)
             .WithLocation(0)
-            .WithArguments("property", "TenantId");
+            .WithMessage("Static property 'TenantId' holds tenant state; static members are shared across all requests and tenants");
 
         var test = CreateTL007Test(source, expected);
         await test.RunAsync(CancellationToken.None);
