@@ -125,7 +125,7 @@ jobs:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to NuGet
-        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
 
       - name: Upload nupkg for release job
         uses: actions/upload-artifact@v4
@@ -171,6 +171,10 @@ jobs:
       - name: Create GitHub Release
         run: |
           TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping."
+            exit 0
+          fi
           PRERELEASE_FLAG=""
           if echo "$TAG" | grep -q -- '-'; then
             PRERELEASE_FLAG="--prerelease"

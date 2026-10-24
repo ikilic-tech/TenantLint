@@ -222,6 +222,7 @@ Diagnostic ID prefix `TL`, category `TenantIsolation`, `helpLinkUri = https://gi
 - **Previews** (`-preview.N`) only for risky changes (new rule families, analysis engine changes); otherwise release stable directly.
 - **New Warning rules** are listed under "New rules (may produce new warnings)" in CHANGELOG so users can review before upgrading. Consider shipping a brand-new heuristic rule as Info first, promoting to Warning in a later minor once false-positive rates are validated.
 - **1.0.0** only when rule IDs, `.editorconfig` keys, and `[CrossTenant]` semantics are considered stable. After 1.0, breaking changes (removing a rule ID, changing a key name, changing `[CrossTenant]` behavior) require a major version bump.
+- **Never re-tag a version that is already on NuGet.** NuGet packages are immutable — once published, a version cannot be overwritten. If a tag's workflow fails after the NuGet push succeeds, fix forward with a new patch version (e.g. `v0.1.3`) instead of deleting and re-creating the tag. The CI workflow handles this gracefully: `dotnet nuget push --skip-duplicate` makes the publish job idempotent, and the release job skips if a GitHub Release already exists.
 
 ## 5b. Working agreement: CLAUDE.md is the source of truth
 
@@ -250,7 +251,9 @@ A .NET 10 minimal API app (`Microsoft.NET.Sdk.Web`) + EF Core 10 (SQLite) multi-
 - On tag `v*`: three jobs run in sequence:
   1. **build** — builds, tests, packs, verifies sample diagnostics.
   2. **publish** — derives version from git tag, packs with `-p:Version`, publishes to NuGet via **NuGet Trusted Publishing** (`NuGet/login@v1` with `secrets.NUGET_USER`, short-lived OIDC key). Has `id-token: write` permission (required for OIDC). No third-party actions beyond official `actions/*` and `NuGet/login`.
-  3. **release** — runs after publish succeeds. Extracts the matching `## [x.y.z]` section from `CHANGELOG.md` via `awk`, creates a GitHub Release with `gh release create`, attaches the `.nupkg`. Has only `contents: write` permission. Fails if the CHANGELOG section is missing. Tags containing `-` are marked `--prerelease`.
+  3. **release** — runs after publish succeeds. Extracts the matching `## [x.y.z]` section from `CHANGELOG.md` via `awk`, creates a GitHub Release with `gh release create`, attaches the `.nupkg`. Has only `contents: write` permission. Fails if the CHANGELOG section is missing. Tags containing `-` are marked `--prerelease`. Skips gracefully if the release already exists.
+- **Idempotent re-runs:** `dotnet nuget push --skip-duplicate` in the publish job and `gh release view` guard in the release job allow re-running a tag's workflow without failure if the package or release was already created.
+- **Early CHANGELOG gate:** The build job verifies (on tags only) that `CHANGELOG.md` has a section for the tag version before any build or publish step runs.
 - **Versioning:** The package version is derived from the git tag in the release workflow (`-p:Version=${GITHUB_REF_NAME#v}`). A validation step fails the build if the tag is not valid SemVer. The csproj `<Version>` is kept as a default for local `dotnet pack` builds but is overridden by CI on tagged releases.
 - **Action pinning policy:** Official `actions/*` (`checkout`, `setup-dotnet`, `upload-artifact`, `download-artifact`) and `NuGet/login` are pinned to major version tags (e.g. `@v4`, `@v1`) — these are maintained by GitHub/NuGet with Verified Creator status. Third-party actions are not used; prefer the preinstalled `gh` CLI for GitHub API operations to minimize supply-chain risk in jobs with elevated permissions.
 
